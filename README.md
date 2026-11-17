@@ -130,5 +130,6 @@ noktasından geriye tarihli işlem üretip geri sızmasını engeller. Bunun tes
 
 **Henüz doğrulanmayanlar**
 - **Bir insanın kendi sesiyle konuşup kulakla dinlemesi.** Konuşmanın hattan anlaşılır geçtiği makine testiyle doğrulandı, kulakla dinlenmedi.
+- **Bu evin ağ ölçümü** (`cargo run --example net_report`): IPv4 ve IPv6 UDP açık; genel bir IPv6 adresi var ve IPv6 eşlemesi hedefe göre değişmiyor, yani IPv6'lı bir arkadaş NAT delmeden doğrudan bağlanabilir. IPv4 NAT türü belirlenemedi. En yakın relay Frankfurt.
 - **İki ayrı evden doğrudan bağlantı (NAT delme).** Bunun için ikinci bir ağ gerekiyor. WSL/Hyper-V ile sanal bir NAT kurmak yönetici onayı ve yeniden başlatma istediğinden bu gece yapılamadı. Doğrudan bağlantı aynı makinede, relay yolu internet üzerinden test edildi; doğrudan bağlantı kurulamazsa uygulama relay'e geçer.
 - **İlk açılışta Windows Güvenlik Duvarı izni.** Windows izin ister. İzin verilirse doğrudan bağlantı kurulabilir, verilmezse relay kullanılır.

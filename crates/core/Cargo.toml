@@ -34,6 +34,7 @@ test-tone = []
 
 [dev-dependencies]
 halka-core = { path = ".", features = ["test-tone"] }
+iroh = { version = "1.4", features = ["unstable-net-report"] }
 tempfile = "3"
 parking_lot = "0.12"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
