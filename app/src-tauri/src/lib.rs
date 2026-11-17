@@ -385,6 +385,12 @@ pub fn run() {
             }) {
                 dir = dir.join("profiles").join(p);
             }
+            let (node, rx) = match tauri::async_runtime::block_on(Node::start(&dir)) {
+                Ok(v) => v,
+                // this profile is already running: the open window stays, the duplicate leaves quietly
+                Err(err) if format!("{err:#}").contains("already open") => std::process::exit(0),
+                Err(err) => return Err(err.into()),
+            };
             // per-profile WebView2 data: two profiles can run side by side and never share storage
             tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
                 .title("Halka")
@@ -395,7 +401,6 @@ pub fn run() {
                 .data_directory(dir.join("webview"))
                 .additional_browser_args(BROWSER_ARGS)
                 .build()?;
-            let (node, rx) = tauri::async_runtime::block_on(Node::start(&dir))?;
             app.manage(node.clone());
             tauri::async_runtime::spawn(pump(app.handle().clone(), node, rx));
             Ok(())
