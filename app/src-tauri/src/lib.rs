@@ -378,6 +378,32 @@ fn show_main(app: &AppHandle) {
     }
 }
 
+/// Checks GitHub Releases at launch and every 6 h, installs silently, never in the middle of a call.
+async fn auto_update(app: AppHandle, node: Node) {
+    loop {
+        if let Err(err) = try_update(&app, &node).await {
+            tracing::warn!("update check failed: {err:#}");
+        }
+        tokio::time::sleep(Duration::from_secs(6 * 3600)).await;
+    }
+}
+
+async fn try_update(app: &AppHandle, node: &Node) -> anyhow::Result<()> {
+    use tauri_plugin_updater::UpdaterExt;
+    let Some(update) = app.updater()?.check().await? else {
+        return Ok(());
+    };
+    tracing::info!("downloading update {}", update.version);
+    let bytes = update.download(|_, _| {}, || {}).await?;
+    while node.snapshot().voice.is_some() {
+        tokio::time::sleep(Duration::from_secs(30)).await;
+    }
+    // install() exits the process on Windows (the installer relaunches Halka), so flush first
+    node.shutdown().await;
+    update.install(bytes)?;
+    app.restart();
+}
+
 pub fn run() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
@@ -392,6 +418,7 @@ pub fn run() {
         }));
     }
     builder
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .on_window_event(|w, e| {
             // the close button keeps Halka running in the tray (voice stays connected)
             if let tauri::WindowEvent::CloseRequested { api, .. } = e {
@@ -473,6 +500,10 @@ pub fn run() {
             }
             tray.build(app)?;
             app.manage(node.clone());
+            // dev builds and side-by-side test profiles never self-update
+            if !cfg!(debug_assertions) && profile().is_none() {
+                tauri::async_runtime::spawn(auto_update(app.handle().clone(), node.clone()));
+            }
             tauri::async_runtime::spawn(pump(app.handle().clone(), node, rx));
             Ok(())
         })

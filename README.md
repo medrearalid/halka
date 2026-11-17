@@ -34,6 +34,18 @@ cargo build --profile fastrel -p halka --features tauri/custom-protocol
 bash tools/e2e/run.sh          # iki gerçek örnek: isim, halka, davet, katılma, sohbet, XSS, ses odası, ekran paylaşımı
 ```
 
+## Sürüm yayınlama ve güncelleme
+
+`app/src-tauri/tauri.conf.json` içindeki `version` değerini artır, commit'le ve aynı sürümle tag at:
+
+```bash
+git tag v0.2.0 && git push origin main v0.2.0
+```
+
+GitHub Actions kurulum dosyasını derleyip imzalar ve [Releases](https://github.com/medrearalid/halka/releases) sayfasına `latest.json` ile birlikte yükler.
+Kurulu uygulamalar açılışta ve 6 saatte bir bu dosyayı kontrol eder. Yeni sürümü arka planda indirir ve sesli görüşmede değilken kendiliğinden kurup yeniden açılır.
+Güncellemeler `TAURI_SIGNING_PRIVATE_KEY` secret'ındaki anahtarla imzalanır; uygulama yalnızca bu anahtarla imzalanmış sürümleri kabul eder.
+
 ## Mimari
 
 ```

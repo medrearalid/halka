@@ -1,0 +1,44 @@
+# Push a tag like v0.2.0 (matching app/src-tauri/tauri.conf.json "version") to publish a release.
+# The release carries the NSIS installer plus latest.json, which installed apps poll to self-update.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tag must match app version
+        shell: bash
+        run: |
+          v="v$(jq -r .version app/src-tauri/tauri.conf.json)"
+          [ "$v" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME != tauri.conf.json $v"; exit 1; }
+
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+
+      - name: Install UI deps
+        working-directory: app
+        run: bun install --frozen-lockfile
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: app
+          tauriScript: bun x @tauri-apps/cli@2
+          tagName: ${{ github.ref_name }}
+          releaseName: Halka ${{ github.ref_name }}
+          releaseBody: Kurulum için Halka_*_x64-setup.exe dosyasını indir. Kurulu uygulamalar kendiliğinden güncellenir.
+          releaseDraft: false
+          prerelease: false
