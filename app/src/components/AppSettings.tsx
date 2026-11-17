@@ -179,6 +179,9 @@ function Audio() {
         <Row label="Akıllı gürültü engelleme" desc="Yapay zekâ (RNNoise) yalnızca konuşmayı geçirir; klavye, fare ve fan sesi gönderilmez.">
           <Switch checked={settings.noise_suppression} onCheckedChange={(v) => saveSettings({ noise_suppression: v })} aria-label="Gürültü bastırma" />
         </Row>
+        <Row label="Uzamsal ses" desc="Odadakileri çemberde oturdukları yönden duyarsın: soldakini solundan, sağdakini sağından.">
+          <Switch checked={settings.spatial_audio} onCheckedChange={(v) => saveSettings({ spatial_audio: v })} aria-label="Uzamsal ses" />
+        </Row>
         <Row label="Yankı engelleme" desc="Hoparlör kullanıyorsan açık tut.">
           <Switch checked={settings.echo_cancellation} onCheckedChange={(v) => saveSettings({ echo_cancellation: v })} aria-label="Yankı engelleme" />
         </Row>

@@ -9,6 +9,7 @@ import { Shell } from "@/components/Shell";
 import { Toasts } from "@/components/Toasts";
 import { Dialogs } from "@/components/Dialogs";
 import { CommandPalette } from "@/components/CommandPalette";
+import { TitleBar } from "@/components/TitleBar";
 
 function useGlobalKeys() {
   useEffect(() => {
@@ -73,6 +74,9 @@ export function App() {
 
   return (
     <TooltipProvider delayDuration={600} skipDelayDuration={200}>
+      <div className="flex h-full flex-col">
+      <TitleBar />
+      <div className="min-h-0 flex-1">
       {bootError ? (
         <div className="grid h-full place-items-center">
           <div className="enter flex max-w-sm flex-col items-center gap-2 text-center">
@@ -95,6 +99,8 @@ export function App() {
           <CommandPalette />
         </>
       )}
+      </div>
+      </div>
       <Dialogs />
       <Toasts />
     </TooltipProvider>

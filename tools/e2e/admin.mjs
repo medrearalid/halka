@@ -66,10 +66,10 @@ await step("setup (core)", async () => {
   await A.until("B listed as online", async () => (await A.inv("snapshot")).spaces[0].members.some((m) => m.id === bid && m.online));
 });
 
-await step("invite dialog yields a working halka1 code", async () => {
+await step("invite dialog yields a working halka: code", async () => {
   await A.click(btn("Davet et"));
   await A.click(btn("Davet kodu oluştur"));
-  await A.until("code shown", async () => (await A.ev(`document.querySelector("[role=dialog] code")?.innerText ?? ""`)).startsWith("halka1"));
+  await A.until("code shown", async () => (await A.ev(`document.querySelector("[role=dialog] code")?.innerText ?? ""`)).startsWith("halka:"));
   const code = await A.ev(`document.querySelector("[role=dialog] code").innerText`);
   if ((await A.inv("join_space", { code })) !== sid) throw new Error("code does not decode to this space");
   await A.key("Escape", 27);

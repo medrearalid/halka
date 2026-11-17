@@ -415,9 +415,20 @@ pub fn run() {
                 Err(err) => return Err(err.into()),
             };
             // per-profile WebView2 data: two profiles can run side by side and never share storage
+            // open comfortably inside the work area (never under the taskbar)
+            let (mut w, mut h) = (1240.0, 800.0);
+            if let Ok(Some(m)) = app.primary_monitor() {
+                let (wa, sf) = (m.work_area().size, m.scale_factor());
+                w = f64::min(w, wa.width as f64 / sf * 0.9);
+                h = f64::min(h, wa.height as f64 / sf * 0.86);
+            }
             tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
                 .title("Halka")
-                .inner_size(1240.0, 800.0)
+                .inner_size(w, h)
+                .center()
+                // our own title bar (window controls live in the web UI)
+                .decorations(false)
+                .shadow(true)
                 .min_inner_size(860.0, 560.0)
                 .theme(Some(tauri::Theme::Dark))
                 .background_color(tauri::window::Color(13, 15, 18, 255))

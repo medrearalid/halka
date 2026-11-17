@@ -34,8 +34,9 @@ pub struct Presence {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct JoinReq {
-    pub space: Id,
+    /// Invite public key; the acceptor looks up which space it belongs to.
     pub invite: Id,
+    /// Invite key's signature over (invite, joiner) under DOMAIN_ADMIT.
     pub proof: Sig,
 }
 

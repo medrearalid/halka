@@ -230,7 +230,13 @@ pub(crate) async fn dial(i: &Arc<Inner>, m: Id, join: Option<wire::JoinReq>) -> 
     };
     ensure!(!spaces.is_empty(), "remote shares no space with us");
     if let Some(j) = &join {
-        ensure!(spaces == [j.space], "join refused");
+        ensure!(spaces.len() == 1, "join refused");
+        // now we know which space the invite opens: file the pending join under it
+        // before any of its ops can arrive
+        let mut st = i.st.lock();
+        if let Some(p) = st.joins.remove(&j.invite) {
+            st.joins.insert(spaces[0], p);
+        }
     }
     let i2 = i.clone();
     tokio::spawn(async move {
@@ -276,9 +282,9 @@ async fn accept(
         allowed.truncate(256);
         let mut joining = None;
         if let Some(j) = join {
-            check_join(&st, &remote, &j)?;
-            allowed = vec![j.space];
-            joining = Some(j.space);
+            let space = check_join(&st, &remote, &j)?;
+            allowed = vec![space];
+            joining = Some(space);
         }
         (allowed, joining)
     };
@@ -358,8 +364,13 @@ fn apply_removal_proof(i: &Inner, space: Id, ops: Vec<SignedOp>) {
     }
 }
 
-fn check_join(st: &St, joiner: &Id, j: &wire::JoinReq) -> Result<()> {
-    let log = st.spaces.get(&j.space).context("unknown space")?;
+/// Admission check for an invite holder; returns the space the invite opens.
+fn check_join(st: &St, joiner: &Id, j: &wire::JoinReq) -> Result<Id> {
+    let log = st
+        .spaces
+        .values()
+        .find(|l| l.state.invites.contains_key(&j.invite))
+        .context("unknown invite")?;
     let s = &log.state;
     ensure!(!s.is_member(joiner), "already a member");
     ensure!(!s.bans.contains(joiner), "banned");
@@ -369,13 +380,13 @@ fn check_join(st: &St, joiner: &Id, j: &wire::JoinReq) -> Result<()> {
     ensure!(
         id::verify(
             &j.invite,
-            op::DOMAIN_JOIN,
-            &op::join_proof_msg(&j.space, joiner),
+            op::DOMAIN_ADMIT,
+            &op::join_proof_msg(&j.invite, joiner),
             &j.proof
         ),
         "bad proof"
     );
-    Ok(())
+    Ok(log.id)
 }
 
 async fn run_peer(
@@ -1129,7 +1140,14 @@ fn voice_changed_quiet(i: &Inner, st: &mut St) {
         .enumerate()
         .map(|(k, m)| {
             let angle = std::f32::consts::PI + (k as f32 + 1.0) * std::f32::consts::TAU / n;
-            (*m, angle.sin() * 0.8)
+            (
+                *m,
+                if st.settings.spatial_audio {
+                    angle.sin() * 0.8
+                } else {
+                    0.0
+                },
+            )
         })
         .collect();
     let log = &st.spaces[&space];

@@ -125,6 +125,8 @@ export interface Settings {
   ptt_key: string;
   /** 0..1 voice-activity threshold */
   vad_threshold: number;
+  /** Hear people from the side of the ring they sit on. */
+  spatial_audio: boolean;
 }
 
 export interface Snapshot {
@@ -144,7 +146,7 @@ export interface Commands {
   set_name: { args: { name: string }; ret: void };
 
   create_space: { args: { name: string }; ret: Id };
-  /** Accepts a "halka1…" invite code. Resolves with the space id once joined. */
+  /** Accepts a "halka:…" invite code. Resolves with the space id once joined. */
   join_space: { args: { code: string }; ret: Id };
   leave_space: { args: { space: Id }; ret: void };
   rename_space: { args: { space: Id; name: string }; ret: void };

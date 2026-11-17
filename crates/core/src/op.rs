@@ -13,6 +13,8 @@ pub const MAX_NAME: usize = 64;
 pub const MAX_PRIVATE_ROLES: usize = 32;
 const DOMAIN_OP: &str = "halka/op/v1";
 pub const DOMAIN_JOIN: &str = "halka/join/v1";
+/// Proof shown to the member we dial, before we know which space the invite belongs to.
+pub const DOMAIN_ADMIT: &str = "halka/admit/v1";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

@@ -59,7 +59,7 @@ export function CreateSpaceForm({ onDone, autoFocus }: { onDone?: (id: Id) => vo
 
 export function JoinForm({ onDone, autoFocus }: { onDone?: (id: Id) => void; autoFocus?: boolean }) {
   const [code, setCode] = useState("");
-  const valid = code.trim().startsWith("halka1");
+  const valid = code.trim().startsWith("halka:");
   const { busy, error, run } = useSubmit(
     () => call("join_space", { code: code.trim() }),
     (id) => {
@@ -77,7 +77,7 @@ export function JoinForm({ onDone, autoFocus }: { onDone?: (id: Id) => void; aut
     >
       <input
         className="field font-mono text-xs"
-        placeholder="halka1…"
+        placeholder="halka:…"
         value={code}
         autoFocus={autoFocus}
         spellCheck={false}

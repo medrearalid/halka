@@ -156,6 +156,7 @@ export function createMockBackend(): Backend {
     push_to_talk: false,
     ptt_key: "KeyV",
     vad_threshold: 0.18,
+    spatial_audio: false,
   };
   let voice: Snapshot["voice"] = null;
   let pttDown = false;
@@ -395,7 +396,7 @@ export function createMockBackend(): Backend {
     },
     join_space: async ({ code }) => {
       await delay(700);
-      if (!/^halka1[0-9a-z]{8,}$/i.test(String(code).trim())) throw "Geçersiz davet kodu";
+      if (!/^halka:[0-9A-Za-z_-]{8,}$/.test(String(code).trim())) throw "Geçersiz davet kodu";
       const s: MSpace = {
         id: newId(), name: "Mahalle", owner: P.burak, channels: [ch("genel", "text"), ch("Oda", "voice")], roles: [],
         members: [mkMember(me.id, [], P.burak), mkMember(P.burak, [], P.burak)], bans: [], invites: [],
@@ -423,7 +424,7 @@ export function createMockBackend(): Backend {
       const id = newId();
       s.invites.push({ id, created_by: me.id, expires: expiresInMs === null ? null : Date.now() + expiresInMs, max_uses: maxUses, uses: 0 });
       changed();
-      return `halka1${id.slice(0, 40)}`;
+      return `halka:${id.slice(0, 40)}`;
     },
     revoke_invite: ({ space, invite }) => {
       const s = sp(space);

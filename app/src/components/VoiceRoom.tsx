@@ -17,6 +17,7 @@ import { MemberMenuContent } from "./MembersPanel";
 export function VoiceRoom({ space, channel }: { space: SpaceView; channel: ChannelView }) {
   const meId = useApp((s) => s.snap!.me.id);
   const joined = useApp((s) => s.snap!.voice?.channel === channel.id);
+  const spatial = useApp((s) => s.snap!.settings.spatial_audio);
   const [focus, setFocus] = useState<Id | null>(null);
   const streams = channel.streams;
   const focused = focus && streams.includes(focus) ? focus : null;
@@ -59,7 +60,9 @@ export function VoiceRoom({ space, channel }: { space: SpaceView; channel: Chann
       <footer className="flex h-11 shrink-0 items-center gap-3 border-t border-line px-4">
         <Headphones className="size-3.5 shrink-0 text-ink-3" />
         <p className="min-w-0 flex-1 truncate text-xs text-ink-3">
-          Halkadaki yerler duyduğun yönle aynı: soldakini solundan, sağdakini sağından duyarsın.
+          {spatial
+            ? "Halkadaki yerler duyduğun yönle aynı: soldakini solundan, sağdakini sağından duyarsın."
+            : "Uzamsal ses kapalı: herkesi tam ortadan duyarsın."}
         </p>
         {joined ? (
           has(space, "stream") && (

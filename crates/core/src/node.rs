@@ -77,7 +77,6 @@ pub(crate) struct Inner {
     pub me: Id,
     pub store: Store,
     pub ep: Endpoint,
-    pub lookup: MemoryLookup,
     pub ev: mpsc::UnboundedSender<Event>,
     pub st: Mutex<St>,
     /// Connections that should receive our voice datagrams.
@@ -172,7 +171,6 @@ impl Node {
             me,
             store,
             ep,
-            lookup,
             ev: tx,
             st: Mutex::new(St {
                 name,
@@ -308,66 +306,60 @@ impl Node {
     pub async fn join_space(&self, code: &str) -> Result<Id> {
         let i = self.0.clone();
         let c = InviteCode::decode(code)?;
-        let sid = c.space;
-        if i.st.lock().spaces.contains_key(&sid) {
-            return Ok(sid);
+        let key = c.key();
+        let invite: Id = key.public().into();
+        let find = |st: &St| {
+            st.spaces
+                .iter()
+                .find(|(_, l)| l.state.invites.contains_key(&invite))
+                .map(|(s, _)| *s)
+        };
+        {
+            let st = i.st.lock();
+            if let Some(s) = find(&st).filter(|s| st.spaces[s].state.is_member(&i.me)) {
+                return Ok(s);
+            }
         }
-        ensure!(!c.peers.is_empty(), "davet kodunda bağlanılacak kimse yok");
+        ensure!(c.peer != i.me, "bu davet kodunu sen oluşturdun");
         let (done_tx, done_rx) = oneshot::channel();
+        // filed under the invite key until the dialed member tells us the space (net::dial)
         i.st.lock().joins.insert(
-            sid,
+            invite,
             PendingJoin {
-                invite: c.key(),
+                invite: key.clone(),
                 done: Some(done_tx),
             },
         );
-        for p in &c.peers {
-            i.lookup.add_endpoint_info(p.clone());
-        }
-        let proof = id::sign(&c.key(), op::DOMAIN_JOIN, &op::join_proof_msg(&sid, &i.me));
-        let req = wire::JoinReq {
-            space: sid,
-            invite: c.key().public().into(),
-            proof,
-        };
-        let peers: Vec<Id> = c
-            .peers
-            .iter()
-            .map(|p| p.id.into())
-            .filter(|p| *p != i.me)
-            .collect();
+        let proof = id::sign(&key, op::DOMAIN_ADMIT, &op::join_proof_msg(&invite, &i.me));
+        let req = wire::JoinReq { invite, proof };
         let dialer = i.clone();
+        let peer = c.peer;
         tokio::spawn(async move {
-            for p in peers {
-                if crate::net::dial(&dialer, p, Some(req.clone()))
-                    .await
-                    .is_ok()
+            if let Err(e) = crate::net::dial(&dialer, peer, Some(req)).await {
+                tracing::debug!("join dial failed: {e:#}");
+                let mut st = dialer.st.lock();
+                if let Some(d) = st
+                    .joins
+                    .values_mut()
+                    .find(|j| Id::from(j.invite.public()) == invite)
+                    .and_then(|j| j.done.take())
                 {
-                    return;
+                    let _ = d.send(Err(anyhow::anyhow!(
+                        "davet edene ulaşılamadı; çevrimiçi olduğundan emin olup tekrar dene"
+                    )));
                 }
-            }
-            if let Some(j) = dialer.st.lock().joins.get_mut(&sid)
-                && let Some(d) = j.done.take()
-            {
-                let _ = d.send(Err(anyhow::anyhow!(
-                    "davetteki kişilerin hiçbirine ulaşılamadı; biri çevrimiçi olunca tekrar dene"
-                )));
             }
         });
         let r = tokio::time::timeout(std::time::Duration::from_secs(45), done_rx).await;
-        {
-            let mut st = i.st.lock();
-            st.joins.remove(&sid);
-            if st
-                .spaces
-                .get(&sid)
-                .is_some_and(|l| !l.state.is_member(&i.me))
-            {
-                drop_space_locked(&i, &mut st, sid);
-            }
+        let mut st = i.st.lock();
+        st.joins
+            .retain(|_, j| Id::from(j.invite.public()) != invite);
+        let sid = find(&st);
+        if let Some(s) = sid.filter(|s| !st.spaces[s].state.is_member(&i.me)) {
+            drop_space_locked(&i, &mut st, s);
         }
         match r {
-            Ok(Ok(Ok(()))) => Ok(sid),
+            Ok(Ok(Ok(()))) => sid.context("halka bulunamadı"),
             Ok(Ok(Err(e))) => Err(e),
             _ => bail!("katılma zaman aşımına uğradı"),
         }
@@ -406,7 +398,8 @@ impl Node {
         max_uses: Option<u32>,
     ) -> Result<String> {
         let i = &self.0;
-        let inv = iroh::SecretKey::generate();
+        let code = InviteCode::new(i.me);
+        let inv = code.key();
         let expires = expires_in_ms.map(|ms| id::now_ms().saturating_add(ms));
         let mut st = i.st.lock();
         author(
@@ -419,26 +412,9 @@ impl Node {
                 max_uses,
             },
         )?;
-        let log = &st.spaces[&space];
-        let mut peers = vec![i.ep.addr()];
-        // add a few online members so the code works while we're offline
-        for (m, p) in st.peers.iter() {
-            if peers.len() >= 4 {
-                break;
-            }
-            if p.spaces.contains(&space) && log.state.is_member(m) {
-                peers.push(crate::net::remote_addr(&p.conn));
-            }
-        }
-        let code = InviteCode {
-            space,
-            space_name: log.state.name.clone(),
-            secret: inv.to_bytes(),
-            peers,
-        };
         drop(st);
         i.emit(Event::Changed);
-        code.encode()
+        Ok(code.encode())
     }
 
     // ------------------------------------------------------------------ messages
@@ -729,6 +705,9 @@ impl Node {
             e.apply(&voice_opts(&s));
         }
         st.settings = s;
+        if st.voice.is_some() {
+            crate::net::voice_changed(i, &mut st); // re-pan for the spatial audio switch
+        }
         drop(st);
         i.emit(Event::Changed);
         Ok(())
