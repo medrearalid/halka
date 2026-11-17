@@ -3,7 +3,6 @@ import { HeadphoneOff, Headphones, Maximize2, MicOff, Minimize2, MonitorUp, Volu
 import type { ChannelView, Id, MemberView, SpaceView } from "@/ipc";
 import { useApp } from "@/state/store";
 import { has, memberOf } from "@/lib/space";
-import { levelRef } from "@/lib/levels";
 import { seatAngles } from "@/lib/seats";
 import { joinVoice, shareScreen } from "@/lib/actions";
 import { cn } from "@/lib/utils";
@@ -11,7 +10,7 @@ import { watchStream } from "@/media/watch";
 import { Button } from "@/components/ui/button";
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Avatar } from "./common";
+import { OrbAvatar } from "./OrbAvatar";
 import { MemberMenuContent } from "./MembersPanel";
 
 export function VoiceRoom({ space, channel }: { space: SpaceView; channel: ChannelView }) {
@@ -30,14 +29,14 @@ export function VoiceRoom({ space, channel }: { space: SpaceView; channel: Chann
   }, [focused]);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="voice-stage flex min-h-0 min-w-0 flex-1 flex-col">
       {/* One tile instance per stream across focus changes, so the decoder never restarts. */}
       {streams.length > 0 && (
         <div
           className={cn(
             focused
               ? "min-h-0 flex-1 p-3 pb-1"
-              : cn("grid shrink-0 gap-2 p-3 pb-0", streams.length === 1 ? "grid-cols-1 justify-items-center" : "mx-auto w-full max-w-[150vh] grid-cols-2"),
+              : cn("grid max-h-[46%] shrink-0 content-start gap-2 overflow-y-auto p-3 pb-0", streams.length === 1 ? "grid-cols-1 justify-items-center" : "mx-auto w-full max-w-[150vh] grid-cols-2"),
           )}
         >
           {streams.map((id) => (
@@ -56,8 +55,8 @@ export function VoiceRoom({ space, channel }: { space: SpaceView; channel: Chann
           ))}
         </div>
       )}
-      {focused ? <SeatStrip space={space} channel={channel} meId={meId} /> : <Ring space={space} channel={channel} meId={meId} joined={joined} />}
-      <footer className="flex h-11 shrink-0 items-center gap-3 border-t border-line px-4">
+      {focused ? <SeatStrip space={space} channel={channel} meId={meId} joined={joined} /> : <Ring space={space} channel={channel} meId={meId} joined={joined} />}
+      <footer className="flex h-11 shrink-0 items-center gap-3 border-t border-line bg-paper-1 px-4">
         <Headphones className="size-3.5 shrink-0 text-ink-3" />
         <p className="min-w-0 flex-1 truncate text-xs text-ink-3">
           {spatial
@@ -97,78 +96,55 @@ function Ring({ space, channel, meId, joined }: { space: SpaceView; channel: Cha
   const [ref, { w, h }] = useSize<HTMLDivElement>();
   const seats = useMemo(() => seatAngles(meId, channel.voice), [meId, channel.voice]);
   const n = seats.length;
-  const box = Math.max(0, Math.min(w, h) - 24);
-  const avatar = Math.round(Math.max(36, Math.min(64, box * 0.12, (box * 2.4) / n)));
-  const r = Math.max(0, box / 2 - avatar * 0.75 - 18);
-  const c = 2 * Math.PI * r;
-  const arc = Math.min(0.1, 0.45 / n) * c;
+  const box = Math.min(w, h, 560);
+  const orbit = n > 1;
+  const avatar = Math.round(orbit
+    ? Math.max(32, Math.min(76, box * 0.16, (box * 2) / n))
+    : Math.max(42, Math.min(116, box * 0.33)));
+  const r = Math.max(0, box / 2 - avatar / 2 - 43);
+  const compact = orbit && r < 42;
 
   return (
-    <div ref={ref} className="relative min-h-[260px] flex-1 overflow-hidden">
-      {box > 0 && (
-        <div className="enter absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" style={{ width: box, height: box }}>
-          <svg className="absolute inset-0" width={box} height={box} aria-hidden>
-            <circle cx={box / 2} cy={box / 2} r={r} fill="none" stroke="var(--ring-line)" strokeWidth="1" />
-            <circle cx={box / 2} cy={box / 2} r={r - 10} fill="none" stroke="var(--ring-line)" strokeWidth="1" strokeDasharray="1 7" opacity="0.7" />
-            {seats.map((s) =>
-              s.id === meId && !joined ? null : (
-                <SpeakArc key={s.id} id={s.id} cx={box / 2} cy={box / 2} r={r} arc={arc} c={c} theta={s.theta} />
-              ),
-            )}
-          </svg>
-          <div className="absolute top-1/2 left-1/2 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center text-center">
-            <span className="text-[15px] font-semibold tracking-tight">{channel.name}</span>
-            <span className="num text-xs text-ink-3">
-              {channel.voice.length === 0 ? "Oda boş" : `${channel.voice.length} kişi`}
-            </span>
+    <div ref={ref} className="relative isolate flex min-h-0 flex-1 flex-col justify-center overflow-hidden">
+      {box > 0 && (compact ? (
+        <SeatStrip space={space} channel={channel} meId={meId} joined={joined} />
+      ) : (
+        <div className="enter relative mx-auto shrink-0" style={{ width: box, height: box }}>
+          {orbit && (
+            <div
+              aria-hidden
+              className="voice-orbit absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full"
+              style={{ width: r * 2, height: r * 2 }}
+            />
+          )}
+          <div className="absolute inset-0">
+            {seats.map((s) => {
+              const x = orbit ? -Math.sin(s.theta) * r : 0;
+              const y = (orbit ? Math.cos(s.theta) * r : -12) - avatar / 2;
+              const m = memberOf(space, s.id);
+              const style = { transform: `translate(calc(-50% + ${x.toFixed(1)}px), ${y.toFixed(1)}px)` };
+              if (s.id === meId && !joined)
+                return (
+                  <div key="me-empty" className="seat absolute top-1/2 left-1/2 flex flex-col items-center" style={style}>
+                    <button
+                      onClick={() => void joinVoice(space.id, channel.id)}
+                      disabled={!has(space, "speak")}
+                      className="grid place-items-center rounded-full border border-dashed border-line-2 bg-paper-2 text-ink-3 transition-colors duration-150 enabled:hover:border-copper enabled:hover:text-copper"
+                      style={{ width: avatar, height: avatar }}
+                      aria-label="Sesli odaya katıl"
+                    >
+                      <Volume2 className="size-[28%]" />
+                    </button>
+                    <div className="mt-2 text-center text-xs text-ink-3">{orbit ? "Senin yerin" : "Oda boş"}</div>
+                  </div>
+                );
+              if (!m) return null;
+              return <Seat key={s.id} space={space} m={m} self={s.id === meId} size={avatar} style={style} />;
+            })}
           </div>
-          {seats.map((s) => {
-            const x = -Math.sin(s.theta) * r;
-            const y = Math.cos(s.theta) * r;
-            const m = memberOf(space, s.id);
-            const style = { transform: `translate(calc(-50% + ${x.toFixed(1)}px), calc(-50% + ${y.toFixed(1)}px))` };
-            if (s.id === meId && !joined)
-              return (
-                <div key="me-empty" className="seat absolute top-1/2 left-1/2" style={style}>
-                  <button
-                    onClick={() => void joinVoice(space.id, channel.id)}
-                    disabled={!has(space, "speak")}
-                    className="grid place-items-center rounded-full border border-dashed border-line-2 text-ink-3 transition-colors duration-150 hover:border-copper hover:text-copper"
-                    style={{ width: avatar, height: avatar }}
-                    aria-label="Sesli odaya katıl"
-                  >
-                    <Volume2 className="size-4" />
-                  </button>
-                  <div className="mt-1.5 text-center text-xs text-ink-3">Senin yerin</div>
-                </div>
-              );
-            if (!m) return null;
-            return <Seat key={s.id} space={space} m={m} self={s.id === meId} size={avatar} style={style} />;
-          })}
         </div>
-      )}
+      ))}
     </div>
-  );
-}
-
-function SpeakArc({ id, cx, cy, r, arc, c, theta }: { id: Id; cx: number; cy: number; r: number; arc: number; c: number; theta: number }) {
-  const lvl = useMemo(() => levelRef(id), [id]);
-  // SVG circles start at 3 o'clock and run clockwise on screen; seat θ is measured from 6 o'clock.
-  const deg = 90 + (theta * 180) / Math.PI - (arc / c) * 180;
-  return (
-    <circle
-      ref={lvl as never}
-      cx={cx}
-      cy={cy}
-      r={r}
-      fill="none"
-      stroke="var(--copper)"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeDasharray={`${arc} ${c}`}
-      transform={`rotate(${deg} ${cx} ${cy})`}
-      style={{ opacity: "calc(var(--lvl) * 1.4)" }}
-    />
   );
 }
 
@@ -181,31 +157,33 @@ function connLabel(m: MemberView) {
 }
 
 function Seat({ space, m, self, size, style }: { space: SpaceView; m: MemberView; self: boolean; size: number; style: CSSProperties }) {
-  const lvl = useMemo(() => levelRef(m.id), [m.id]);
   const conn = connLabel(m);
   const v = m.voice;
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <div className="seat absolute top-1/2 left-1/2 flex flex-col items-center" style={style}>
-          <div ref={lvl} className="relative" style={{ width: size, height: size }}>
-            <span
-              className="pointer-events-none absolute -inset-[5px] rounded-full border-2 border-copper will-change-transform"
-              style={{ opacity: "min(1, calc(var(--lvl) * 2.2))", transform: "scale(calc(1 + var(--lvl) * 0.16))" }}
-            />
-            <Avatar id={m.id} name={m.name} size={size} className={cn(v?.deafened && "opacity-60")} />
-            {(v?.muted || v?.deafened) && (
-              <span className="absolute -right-1.5 -bottom-1 grid size-[18px] place-items-center rounded-full bg-paper-1 text-danger ring-1 ring-line-2">
-                {v.deafened ? <HeadphoneOff className="size-3" /> : <MicOff className="size-3" />}
-              </span>
-            )}
-            {v?.streaming && (
-              <span className="absolute -top-1 -right-1.5 grid size-[18px] place-items-center rounded-full bg-paper-1 text-copper ring-1 ring-line-2">
-                <MonitorUp className="size-3" />
-              </span>
-            )}
-          </div>
-          <div className="mt-1.5 max-w-[110px] truncate text-center text-xs font-medium tracking-tight">{self ? `${m.name} (sen)` : m.name}</div>
+          <button
+            type="button"
+            aria-label={`${m.name} profili`}
+            aria-haspopup="dialog"
+            className="rounded-full"
+            onClick={(e) => useApp.getState().openProfile(m.id, space.id, e.currentTarget)}
+          >
+            <OrbAvatar id={m.id} name={m.name} size={size} muted={v?.muted} deafened={v?.deafened} live>
+              {(v?.muted || v?.deafened) && (
+                <span className="absolute -right-1.5 -bottom-1 grid size-[18px] place-items-center rounded-full bg-paper-1 text-danger ring-1 ring-line-2">
+                  {v.deafened ? <HeadphoneOff className="size-3" /> : <MicOff className="size-3" />}
+                </span>
+              )}
+              {v?.streaming && (
+                <span className="absolute -top-1 -right-1.5 grid size-[18px] place-items-center rounded-full bg-paper-1 text-copper ring-1 ring-line-2">
+                  <MonitorUp className="size-3" />
+                </span>
+              )}
+            </OrbAvatar>
+          </button>
+          <div className="mt-2.5 max-w-[110px] truncate text-center text-xs font-medium tracking-tight">{self ? `${m.name} (sen)` : m.name}</div>
           {conn && (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -226,29 +204,32 @@ function Seat({ space, m, self, size, style }: { space: SpaceView; m: MemberView
   );
 }
 
-function SeatStrip({ space, channel, meId }: { space: SpaceView; channel: ChannelView; meId: Id }) {
+function SeatStrip({ space, channel, meId, joined }: { space: SpaceView; channel: ChannelView; meId: Id; joined: boolean }) {
   const seats = seatAngles(meId, channel.voice);
   return (
-    <div className="flex shrink-0 items-center justify-center gap-4 py-1">
+    <div className="flex shrink-0 items-center justify-center-safe gap-4 overflow-x-auto px-3 py-2">
       {seats.map(({ id }) => {
+        if (id === meId && !joined) return null;
         const m = memberOf(space, id);
-        return m ? <MiniSeat key={id} m={m} /> : null;
+        return m ? <MiniSeat key={id} m={m} space={space.id} /> : null;
       })}
     </div>
   );
 }
 
-function MiniSeat({ m }: { m: MemberView }) {
-  const lvl = useMemo(() => levelRef(m.id), [m.id]);
+function MiniSeat({ m, space }: { m: MemberView; space: Id }) {
   return (
-    <div className="flex items-center gap-1.5">
-      <div ref={lvl} className="relative size-7">
-        <span className="absolute -inset-[3px] rounded-full border-[1.5px] border-copper" style={{ opacity: "min(1, calc(var(--lvl) * 2.2))" }} />
-        <Avatar id={m.id} name={m.name} size={28} />
-      </div>
+    <button
+      type="button"
+      aria-label={`${m.name} profili`}
+      aria-haspopup="dialog"
+      className="flex shrink-0 items-center gap-1.5 rounded-md"
+      onClick={(e) => useApp.getState().openProfile(m.id, space, e.currentTarget)}
+    >
+      <OrbAvatar id={m.id} name={m.name} size={28} muted={m.voice?.muted} deafened={m.voice?.deafened} live mini />
       <span className="text-xs text-ink-2">{m.name}</span>
       {m.voice?.muted && <MicOff className="size-3 text-danger" />}
-    </div>
+    </button>
   );
 }
 

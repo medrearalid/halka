@@ -78,10 +78,12 @@ function MemberRow({ space, m }: { space: SpaceView; m: MemberView }) {
     <li>
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          <div
-            tabIndex={0}
+          <button
+            type="button"
+            aria-haspopup="dialog"
+            onClick={(e) => useApp.getState().openProfile(m.id, space.id, e.currentTarget)}
             className={cn(
-              "flex h-8 items-center gap-2 rounded-md px-2 outline-none hover:bg-paper-3 focus-visible:bg-paper-3 data-[state=open]:bg-paper-3",
+              "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left hover:bg-paper-3 focus-visible:bg-paper-3 data-[state=open]:bg-paper-3",
               !m.online && "opacity-55",
             )}
           >
@@ -90,7 +92,7 @@ function MemberRow({ space, m }: { space: SpaceView; m: MemberView }) {
             {m.is_owner && <Crown className="size-3 shrink-0 text-copper" aria-label="Kurucu" />}
             {v?.streaming && <MonitorUp className="size-3 shrink-0 text-copper" />}
             {v && (v.deafened ? <HeadphoneOff className="size-3 shrink-0 text-ink-3" /> : v.muted ? <MicOff className="size-3 shrink-0 text-ink-3" /> : <Volume2 className="size-3 shrink-0 text-live" />)}
-          </div>
+          </button>
         </ContextMenuTrigger>
         <MemberMenuContent space={space} m={m} />
       </ContextMenu>

@@ -84,14 +84,7 @@ pub fn check_text(t: &str) -> Result<()> {
 pub fn authorized(st: &State, m: &Msg, now: u64) -> Result<()> {
     ensure!(m.space == st.id, "wrong space");
     ensure!(m.ts <= now + MAX_CLOCK_SKEW_MS, "message from the future");
-    let ch = st
-        .channels
-        .get(&m.channel)
-        .ok_or_else(|| anyhow::anyhow!("kanal yok"))?;
-    ensure!(
-        ch.kind == crate::op::ChannelKind::Text,
-        "metin kanalı değil"
-    );
+    ensure!(st.channels.contains_key(&m.channel), "kanal yok");
     if st.is_member(&m.author) {
         let need = match m.body {
             MsgBody::Text { .. } | MsgBody::Edit { .. } => Perms::SEND,

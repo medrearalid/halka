@@ -1,5 +1,6 @@
 import * as React from "react";
 import { hueOf, initials } from "@/lib/avatar";
+import { useProfilePhoto } from "@/lib/profile";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
@@ -11,6 +12,7 @@ export function Avatar({
   online,
   className,
   style,
+  photoSrc,
 }: {
   id: string;
   name: string;
@@ -18,14 +20,17 @@ export function Avatar({
   online?: boolean;
   className?: string;
   style?: React.CSSProperties;
+  photoSrc?: string | null;
 }) {
+  const storedPhoto = useProfilePhoto(id, photoSrc === undefined);
+  const photo = photoSrc === undefined ? storedPhoto : photoSrc;
   return (
     <span
       className={cn("avatar relative inline-grid shrink-0 place-items-center rounded-full font-semibold tracking-tight", className)}
       style={{ "--h": hueOf(id), width: size, height: size, fontSize: Math.max(8, Math.round(size * 0.38)), ...style } as React.CSSProperties}
       aria-hidden
     >
-      {initials(name)}
+      {photo ? <img src={photo} alt="" draggable={false} className="absolute inset-0 size-full rounded-full object-cover" /> : initials(name)}
       {online !== undefined && (
         <span
           className={cn(

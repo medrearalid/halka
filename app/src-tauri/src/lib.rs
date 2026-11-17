@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use halka_core::Node;
+use halka_core::{Node, PhotoEdit};
 use halka_core::api::{AudioDevices, Event, MessageView, Settings, Snapshot};
 use halka_core::id::Id;
 use halka_core::op::{ChannelKind, OpBody};
@@ -26,6 +26,16 @@ fn snapshot(n: State<Node>) -> Snapshot {
 #[tauri::command(async)]
 fn set_name(n: State<Node>, name: String) -> R<()> {
     n.set_name(&name).map_err(e)
+}
+
+#[tauri::command(async)]
+fn update_profile(n: State<Node>, name: String, orb_color: u32, bio: String, photo: PhotoEdit) -> R<()> {
+    n.update_profile(&name, orb_color, &bio, photo).map_err(e)
+}
+
+#[tauri::command(async)]
+fn profile_photo(n: State<Node>, member: Id, hash: Id) -> R<String> {
+    n.profile_photo(member, hash).map_err(e)
 }
 
 #[tauri::command(async)]
@@ -510,6 +520,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             snapshot,
             set_name,
+            update_profile,
+            profile_photo,
             create_space,
             join_space,
             leave_space,

@@ -6,6 +6,13 @@ use crate::id::Id;
 use crate::op::ChannelKind;
 
 #[derive(Clone, Debug, Serialize)]
+pub struct ProfileView {
+    pub orb_color: u32,
+    pub bio: String,
+    pub photo: Option<Id>,
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub struct Me {
     pub id: Id,
     pub name: String,
@@ -54,6 +61,7 @@ pub struct VoiceState {
 pub struct MemberView {
     pub id: Id,
     pub name: String,
+    pub code: String,
     pub roles: Vec<Id>,
     pub is_owner: bool,
     pub online: bool,
@@ -140,6 +148,7 @@ pub struct MyVoice {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Snapshot {
+    pub profiles: std::collections::HashMap<Id, ProfileView>,
     pub me: Me,
     pub spaces: Vec<SpaceView>,
     pub settings: Settings,

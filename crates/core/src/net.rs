@@ -433,6 +433,9 @@ async fn run_peer(
         } else {
             send_summaries(&i, &mut st, remote);
             announce_presence(&st, remote);
+            if !we_dialed {
+                crate::profile::announce(&i, &st, remote, true);
+            }
         }
         if st.voice.is_some() {
             voice_changed(&i, &mut st);
@@ -576,20 +579,16 @@ fn msg_items(i: &Inner, space: &Id, channel: &Id, from: u64, to: u64) -> Vec<(u6
         .unwrap_or_default()
 }
 
-/// Text channels both we and `remote` may read.
+/// Channels whose messages both we and `remote` may read.
 fn shared_channels(i: &Inner, st: &St, space: &Id, remote: &Id) -> Vec<Id> {
     let Some(l) = st.spaces.get(space) else {
         return vec![];
     };
     l.state
         .channels
-        .iter()
-        .filter(|(c, ch)| {
-            ch.kind == op::ChannelKind::Text
-                && l.state.can_view(&i.me, c)
-                && l.state.can_view(remote, c)
-        })
-        .map(|(c, _)| *c)
+        .keys()
+        .filter(|c| l.state.can_view(&i.me, c) && l.state.can_view(remote, c))
+        .copied()
         .collect()
 }
 
@@ -923,6 +922,7 @@ fn ingest_ops(
             p.joining = None;
         }
         send_summaries(i, st, remote);
+        crate::profile::announce(i, st, remote, true);
         // they missed our voice presence while joining; without this they'd never hear the room
         announce_presence(st, remote);
     }
@@ -1186,10 +1186,27 @@ async fn datagram_loop(i: Arc<Inner>, conn: Connection, remote: Id) {
 }
 
 async fn uni_loop(i: Arc<Inner>, conn: Connection, remote: Id) {
+    let profile_reads = Arc::new(tokio::sync::Semaphore::new(4));
+    let profile_rate = Arc::new(parking_lot::Mutex::new(Rate::new(8.0, 24.0)));
     while let Ok(mut r) = conn.accept_uni().await {
         let i = i.clone();
+        let conn = conn.clone();
+        let profile_reads = profile_reads.clone();
+        let profile_rate = profile_rate.clone();
         tokio::spawn(async move {
-            let _ = read_gop(&i, &mut r, remote).await;
+            let mut tag = [0u8; 1];
+            if matches!(tokio::time::timeout(Duration::from_secs(5), r.read_exact(&mut tag)).await, Ok(Ok(_))) {
+                match tag[0] {
+                    wire::UNI_STREAM => { let _ = read_gop(&i, &mut r, remote).await; }
+                    crate::profile::TAG => {
+                        let allowed = profile_rate.lock().allow(1.0);
+                        if allowed && let Ok(_permit) = profile_reads.try_acquire() {
+                            let _ = crate::profile::receive(&i, &conn, &mut r, remote).await;
+                        }
+                    }
+                    _ => {}
+                }
+            }
             let _ = r.stop(0u32.into());
         });
     }
@@ -1197,9 +1214,6 @@ async fn uni_loop(i: Arc<Inner>, conn: Connection, remote: Id) {
 
 /// One GOP stream from a sharer we're watching. A newer GOP supersedes older ones.
 async fn read_gop(i: &Inner, r: &mut RecvStream, remote: Id) -> Result<()> {
-    let mut tag = [0u8; 1];
-    r.read_exact(&mut tag).await?;
-    ensure!(tag[0] == wire::UNI_STREAM, "unknown uni stream");
     let (sink, gen_ctr) =
         i.st.lock()
             .watching

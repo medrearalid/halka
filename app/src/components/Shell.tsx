@@ -1,4 +1,4 @@
-import { Hash, Lock, UserPlus, Users, Volume2, Settings2 } from "lucide-react";
+import { Hash, Lock, MessageSquare, UserPlus, Users, Volume2, Settings2 } from "lucide-react";
 import { useApp } from "@/state/store";
 import { has, useSpace } from "@/lib/space";
 import { cn } from "@/lib/utils";
@@ -12,8 +12,9 @@ export function Shell() {
   const space = useSpace();
   const channelId = useApp((s) => s.channel);
   const membersOpen = useApp((s) => s.membersOpen);
+  const voiceChatOpen = useApp((s) => s.voiceChatOpen);
   const channel = space?.channels.find((c) => c.id === channelId) ?? null;
-  const { setMembersOpen, openDialog } = useApp.getState();
+  const { setMembersOpen, setVoiceChatOpen, openDialog } = useApp.getState();
   const canSettings =
     !!space && (has(space, "manage_space") || has(space, "manage_channels") || has(space, "manage_roles") || has(space, "ban"));
 
@@ -35,6 +36,22 @@ export function Shell() {
             <span className="text-[13px] text-ink-3">Kanal seçilmedi</span>
           )}
           <div className="ml-auto flex items-center gap-0.5">
+            {channel?.kind === "voice" && (
+              <>
+                <IconBtn
+                  label={voiceChatOpen ? "Yazışmayı gizle" : "Yazışmayı göster"}
+                  side="bottom"
+                  aria-expanded={voiceChatOpen}
+                  aria-controls="voice-chat"
+                  onClick={() => setVoiceChatOpen(!voiceChatOpen)}
+                  className={cn("relative", voiceChatOpen && "bg-paper-3 text-ink-1")}
+                >
+                  <MessageSquare />
+                  {!voiceChatOpen && channel.unread > 0 && <span className="absolute top-1 right-1 size-1.5 rounded-full bg-copper" />}
+                </IconBtn>
+                <span className="mx-1 h-4 w-px bg-line" aria-hidden />
+              </>
+            )}
             {has(space, "invite") && (
               <IconBtn label="Davet et" side="bottom" onClick={() => openDialog("invite")}>
                 <UserPlus />
@@ -57,7 +74,7 @@ export function Shell() {
           </div>
         </header>
         <div className="flex min-h-0 flex-1">
-          <main className="flex min-w-0 flex-1 flex-col">
+          <main className="@container flex min-w-0 flex-1 flex-col">
             {!space || !channel ? (
               <div className="grid flex-1 place-items-center">
                 <Empty icon={<RingMark size={26} />} title="Burada henüz kanal yok" body="Halka ayarlarından bir metin kanalı ya da ses odası oluştur." />
@@ -65,7 +82,22 @@ export function Shell() {
             ) : channel.kind === "text" ? (
               <ChatView key={channel.id} space={space} channel={channel} />
             ) : (
-              <VoiceRoom key={channel.id} space={space} channel={channel} />
+              <div key={channel.id} className="flex min-h-0 flex-1 flex-col @2xl:flex-row">
+                <VoiceRoom space={space} channel={channel} />
+                <aside
+                  id="voice-chat"
+                  aria-label={`${channel.name} yazışması`}
+                  className={cn(
+                    "min-h-0 min-w-0 shrink-0 basis-[42%] flex-col border-t border-line bg-paper-1 @2xl:w-[min(42%,340px)] @2xl:basis-auto @2xl:border-t-0 @2xl:border-l",
+                    voiceChatOpen ? "flex" : "hidden",
+                  )}
+                >
+                  <div className="flex h-10 shrink-0 items-center gap-2 border-b border-line px-4 text-xs font-medium text-ink-2">
+                    <MessageSquare className="size-3.5 text-ink-3" /> Oda yazışması
+                  </div>
+                  <ChatView space={space} channel={channel} open={voiceChatOpen} />
+                </aside>
+              </div>
             )}
           </main>
           {membersOpen && space && <MembersPanel space={space} />}

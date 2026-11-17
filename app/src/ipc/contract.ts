@@ -61,6 +61,7 @@ export interface VoiceState {
 export interface MemberView {
   id: Id;
   name: string;
+  code: string;
   roles: Id[];
   is_owner: boolean;
   online: boolean;
@@ -131,6 +132,7 @@ export interface Settings {
 
 export interface Snapshot {
   me: Me;
+  profiles: Record<Id, ProfileView | undefined>;
   spaces: SpaceView[];
   settings: Settings;
   /** the voice channel we're in, if any */
@@ -139,11 +141,21 @@ export interface Snapshot {
   online: boolean;
 }
 
+export interface ProfileView {
+  orb_color: number;
+  bio: string;
+  photo: Id | null;
+}
+
+export type PhotoEdit = { kind: "keep" | "remove" } | { kind: "replace"; data: string };
+
 // ---------------------------------------------------------------- commands
 // invoke<Ret>(name, args). All commands reject with a human-readable string on error.
 export interface Commands {
   snapshot: { args: {}; ret: Snapshot };
   set_name: { args: { name: string }; ret: void };
+  update_profile: { args: { name: string; orbColor: number; bio: string; photo: PhotoEdit }; ret: void };
+  profile_photo: { args: { member: Id; hash: Id }; ret: string };
 
   create_space: { args: { name: string }; ret: Id };
   /** Accepts a "halka:…" invite code. Resolves with the space id once joined. */

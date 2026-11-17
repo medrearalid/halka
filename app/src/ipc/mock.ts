@@ -7,6 +7,7 @@ import type {
   MemberView,
   MessageView,
   Perm,
+  ProfileView,
   RoleView,
   Settings,
   Snapshot,
@@ -67,10 +68,17 @@ export function createMockBackend(): Backend {
     { id: hexId("burak"), name: "Burak", online: false, conn: "none", rtt: null },
   ];
   const P = Object.fromEntries(people.map((p) => [p.name.split(" ")[0].toLowerCase(), p.id])) as Record<string, Id>;
+  const profiles: Snapshot["profiles"] = fresh ? {} : {
+    [P.deniz]: { orb_color: 0x70d5bb, bio: "Genellikle akşamları buradayım.", photo: null },
+    [P.zeynep]: { orb_color: 0xf2a26d, bio: "", photo: null },
+    [P.kaan]: { orb_color: 0x7b9dff, bio: "", photo: null },
+  };
+  const photos = new Map<Id, string>();
 
   const mkMember = (id: Id, roles: Id[], owner: Id): MemberView => {
     const p = people.find((x) => x.id === id)!;
-    return { id, name: p.name, roles, is_owner: id === owner, online: p.online, conn: p.conn, rtt_ms: p.rtt, voice: null };
+    const code = id === me.id ? me.code : id.slice(0, 12).toUpperCase().match(/.{4}/g)!.join("-");
+    return { id, name: p.name, code, roles, is_owner: id === owner, online: p.online, conn: p.conn, rtt_ms: p.rtt, voice: null };
   };
   const ch = (name: string, kind: ChannelView["kind"], extra: Partial<ChannelView> = {}): ChannelView => ({
     id: hexId(`ch-${name}-${kind}-${Math.random()}`),
@@ -219,6 +227,7 @@ export function createMockBackend(): Backend {
   };
   const snapshot = (): Snapshot => ({
     me: { ...me },
+    profiles: structuredClone(profiles),
     spaces: spaces.map((sp) => ({
       ...structuredClone(sp),
       my_perms: permsOf(sp),
@@ -383,6 +392,27 @@ export function createMockBackend(): Backend {
       }
       changed();
     },
+    update_profile: ({ name, orbColor, bio, photo }) => {
+      const about = String(bio).trim();
+      if (Array.from(about).length > 160) throw "Biyografi en fazla 160 karakter olabilir";
+      if (!Number.isInteger(orbColor) || orbColor < 0 || orbColor > 0xffffff) throw "Geçersiz orb rengi";
+      if (photo.kind === "replace" && atob(photo.data).length > 32 * 1024) throw "Profil fotoğrafı çok büyük";
+      commands.set_name({ name });
+      const profile: ProfileView = { orb_color: orbColor, bio: about, photo: profiles[me.id]?.photo ?? null };
+      if (photo.kind === "replace") {
+        profile.photo = hexId(photo.data);
+        photos.set(me.id, photo.data);
+      } else if (photo.kind === "remove") {
+        profile.photo = null;
+        photos.delete(me.id);
+      }
+      profiles[me.id] = profile;
+    },
+    profile_photo: ({ member, hash }) => {
+      const photo = photos.get(member);
+      if (!photo || profiles[member]?.photo !== hash) throw "Profil fotoğrafı bulunamadı";
+      return photo;
+    },
     create_space: ({ name }) => {
       const s: MSpace = {
         id: newId(), name: String(name).trim() || "Yeni halka", owner: me.id,
@@ -521,10 +551,13 @@ export function createMockBackend(): Backend {
     send_message: ({ space, channel, text, replyTo }) => {
       const s = sp(space);
       need(s, "send");
+      if (!s.channels.some((c) => c.id === channel)) throw "Kanal bulunamadı";
       const t = String(text);
       if (!t.trim() || t.length > 4000) throw "Mesaj boş ya da çok uzun";
       const m: MessageView = { id: newId(), space: s.id, channel, author: me.id, ts: Date.now(), text: t, reply_to: replyTo, edited: false, deleted: false };
-      messages.get(channel)?.push(m);
+      const list = messages.get(channel) ?? [];
+      list.push(m);
+      messages.set(channel, list);
       setTimeout(() => emit("message", m), 40);
       return m.id;
     },

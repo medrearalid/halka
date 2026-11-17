@@ -12,6 +12,7 @@ import { CreateSpaceForm, JoinForm, useSubmit } from "./forms";
 import { SpaceSettings } from "./SpaceSettings";
 import { AppSettings } from "./AppSettings";
 import { ShareSheet } from "./ShareSheet";
+import { ProfilePanel } from "./ProfilePanel";
 
 export function Dialogs() {
   const dialog = useApp((s) => s.dialog);
@@ -28,13 +29,21 @@ export function Dialogs() {
               ? "h-[min(600px,calc(100vh-48px))] w-[min(820px,calc(100vw-32px))] max-w-none sm:max-w-none"
               : kind === "share"
                 ? "w-[440px] sm:max-w-[440px]"
-                : "w-[380px] sm:max-w-[380px]",
+                : kind === "profile" ? "w-[min(444px,calc(100dvw-32px))] max-w-none sm:max-w-none" : "w-[380px] sm:max-w-[380px]",
           )}
           aria-describedby={undefined}
           // settings open on their content, not with a focus ring on the first tab
           onOpenAutoFocus={big ? (e) => (e.preventDefault(), (e.currentTarget as HTMLElement).focus()) : undefined}
+          onCloseAutoFocus={dialog.kind === "profile" ? (event) => {
+            if (dialog.trigger?.isConnected) {
+              event.preventDefault();
+              dialog.trigger.focus();
+            }
+          } : undefined}
         >
-          {kind === "space-settings" ? (
+          {dialog.kind === "profile" ? (
+            <ProfilePanel key={dialog.member} member={dialog.member} space={dialog.space} />
+          ) : dialog.kind === "space-settings" ? (
             <SpaceSettings initialTab={dialog.tab} />
           ) : kind === "app-settings" ? (
             <AppSettings />

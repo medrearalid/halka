@@ -9,6 +9,7 @@ use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
 use crate::id::Id;
 use crate::msg::{Msg, MsgBody, SignedMsg};
 use crate::op::SignedOp;
+use crate::profile::{Profile, ProfileMeta};
 
 const META: TableDefinition<&str, &[u8]> = TableDefinition::new("meta");
 /// space ++ op id -> SignedOp
@@ -27,6 +28,8 @@ const MSG_IDX: TableDefinition<&[u8; 32], &[u8]> = TableDefinition::new("msg_idx
 const PEERS: TableDefinition<&[u8; 32], &[u8]> = TableDefinition::new("peers");
 /// space ++ channel -> last read ts
 const READ: TableDefinition<&[u8], u64> = TableDefinition::new("read");
+const PROFILES: TableDefinition<&[u8; 32], &[u8]> = TableDefinition::new("profiles");
+const PROFILE_PHOTOS: TableDefinition<&[u8; 32], &[u8]> = TableDefinition::new("profile_photos");
 
 pub struct Store {
     db: Database,
@@ -71,6 +74,8 @@ impl Store {
             w.open_table(MSG_IDX)?;
             w.open_table(PEERS)?;
             w.open_table(READ)?;
+            w.open_table(PROFILES)?;
+            w.open_table(PROFILE_PHOTOS)?;
         }
         w.commit()?;
         Ok(Store { db })
@@ -84,6 +89,56 @@ impl Store {
     pub fn set_meta(&self, k: &str, v: &[u8]) -> Result<()> {
         let w = self.db.begin_write()?;
         w.open_table(META)?.insert(k, v)?;
+        w.commit()?;
+        Ok(())
+    }
+
+    pub(crate) fn load_profiles(&self) -> Result<std::collections::HashMap<Id, Profile>> {
+        let r = self.db.begin_read()?;
+        let photos = r.open_table(PROFILE_PHOTOS)?;
+        let mut profiles = std::collections::HashMap::new();
+        for entry in r.open_table(PROFILES)?.iter()? {
+            let (key, value) = entry?;
+            let meta = postcard::from_bytes(value.value())?;
+            profiles.insert(Id(*key.value()), Profile {
+                meta,
+                photo_ready: photos.get(key.value())?.is_some(),
+            });
+        }
+        Ok(profiles)
+    }
+
+    pub(crate) fn put_profile(
+        &self,
+        member: Id,
+        meta: &ProfileMeta,
+        name: Option<&str>,
+        photo: Option<&[u8]>,
+        remove_photo: bool,
+    ) -> Result<()> {
+        let bytes = postcard::to_stdvec(meta)?;
+        let w = self.db.begin_write()?;
+        w.open_table(PROFILES)?.insert(&member.0, bytes.as_slice())?;
+        if let Some(name) = name {
+            w.open_table(META)?.insert("name", name.as_bytes())?;
+        }
+        if let Some(photo) = photo {
+            w.open_table(PROFILE_PHOTOS)?.insert(&member.0, photo)?;
+        } else if remove_photo {
+            w.open_table(PROFILE_PHOTOS)?.remove(&member.0)?;
+        }
+        w.commit()?;
+        Ok(())
+    }
+
+    pub(crate) fn profile_photo(&self, member: Id) -> Result<Option<Vec<u8>>> {
+        let r = self.db.begin_read()?;
+        Ok(r.open_table(PROFILE_PHOTOS)?.get(&member.0)?.map(|v| v.value().to_vec()))
+    }
+
+    pub(crate) fn put_profile_photo(&self, member: Id, photo: &[u8]) -> Result<()> {
+        let w = self.db.begin_write()?;
+        w.open_table(PROFILE_PHOTOS)?.insert(&member.0, photo)?;
         w.commit()?;
         Ok(())
     }

@@ -18,6 +18,7 @@ use crate::invite::InviteCode;
 use crate::msg::{self, Msg, MsgBody, SignedMsg};
 use crate::op::{self, ChannelKind, OpBody, SignedOp};
 use crate::perm::Perms;
+use crate::profile::Profile;
 use crate::space::{SpaceLog, create_genesis};
 use crate::store::{Store, StoredMsg};
 use crate::voice::{Voice, VoiceOptions};
@@ -57,6 +58,7 @@ pub(crate) struct PendingJoin {
 
 pub(crate) struct St {
     pub name: String,
+    pub profiles: HashMap<Id, Profile>,
     pub settings: Settings,
     pub spaces: BTreeMap<Id, SpaceLog>,
     pub peers: HashMap<Id, Peer>,
@@ -131,6 +133,7 @@ impl Node {
             .meta("name")?
             .and_then(|b| String::from_utf8(b).ok())
             .unwrap_or_default();
+        let profiles = store.load_profiles()?;
 
         let mut spaces = BTreeMap::new();
         for (sid, ops) in store.load_spaces()? {
@@ -174,6 +177,7 @@ impl Node {
             ev: tx,
             st: Mutex::new(St {
                 name,
+                profiles,
                 settings,
                 spaces,
                 peers: HashMap::new(),
@@ -219,12 +223,21 @@ impl Node {
     pub fn snapshot(&self) -> Snapshot {
         let i = &self.0;
         let st = i.st.lock();
-        let spaces = st
+        let spaces: Vec<_> = st
             .spaces
             .values()
             .map(|log| space_view(i, &st, log))
             .collect();
+        let mut profiles = HashMap::new();
+        for id in std::iter::once(i.me).chain(
+            spaces.iter().flat_map(|space| space.members.iter().map(|m| m.id)),
+        ) {
+            if let Some(profile) = st.profiles.get(&id) {
+                profiles.entry(id).or_insert_with(|| profile.view());
+            }
+        }
         Snapshot {
+            profiles,
             me: api::Me {
                 id: i.me,
                 name: st.name.clone(),
@@ -248,20 +261,9 @@ impl Node {
         let name = name.trim();
         op::check_name(name)?;
         let i = &self.0;
-        i.store.set_meta("name", name.as_bytes())?;
         let mut st = i.st.lock();
-        st.name = name.to_string();
-        let ids: Vec<Id> = st.spaces.keys().copied().collect();
-        for s in ids {
-            if st.spaces[&s]
-                .state
-                .members
-                .get(&i.me)
-                .is_some_and(|m| m.name != name)
-            {
-                let _ = author(i, &mut st, s, OpBody::SetName { name: name.into() });
-            }
-        }
+        i.store.set_meta("name", name.as_bytes())?;
+        publish_name(i, &mut st, name);
         drop(st);
         i.emit(Event::Changed);
         Ok(())
@@ -849,6 +851,16 @@ pub(crate) fn voice_opts(s: &Settings) -> VoiceOptions {
     }
 }
 
+pub(crate) fn publish_name(i: &Inner, st: &mut St, name: &str) {
+    st.name = name.to_string();
+    let spaces: Vec<_> = st.spaces.iter().filter_map(|(&id, space)| {
+        space.state.members.get(&i.me).filter(|m| m.name != name).map(|_| id)
+    }).collect();
+    for space in spaces {
+        let _ = author(i, st, space, OpBody::SetName { name: name.into() });
+    }
+}
+
 /// Author a control op, persist it and push it to peers.
 pub(crate) fn author(i: &Inner, st: &mut St, space: Id, body: OpBody) -> Result<Id> {
     let log = st.spaces.get_mut(&space).context("halka yok")?;
@@ -961,11 +973,7 @@ fn space_view(i: &Inner, st: &St, log: &SpaceLog) -> api::SpaceView {
                     .map(|r| r.iter().copied().collect()),
                 voice,
                 streams,
-                unread: if c.kind == ChannelKind::Text {
-                    i.store.unread(&s.id, cid, &me).unwrap_or(0)
-                } else {
-                    0
-                },
+                unread: i.store.unread(&s.id, cid, &me).unwrap_or(0),
             }
         })
         .collect();
@@ -1016,6 +1024,7 @@ fn space_view(i: &Inner, st: &St, log: &SpaceLog) -> api::SpaceView {
             api::MemberView {
                 id: *m,
                 name: mm.name.clone(),
+                code: api::safety_code(m),
                 roles: mm.roles.iter().copied().collect(),
                 is_owner: *m == s.owner,
                 online,

@@ -1,7 +1,7 @@
 //! End-to-end: real iroh endpoints in one process (direct LAN/loopback paths).
 use std::time::Duration;
 
-use halka_core::Node;
+use halka_core::{Node, PhotoEdit};
 use halka_core::id::Id;
 use halka_core::op::{ChannelKind, OpBody};
 
@@ -20,6 +20,69 @@ async fn until(what: &str, mut f: impl FnMut() -> bool) {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     panic!("timed out waiting for: {what}");
+}
+
+async fn restart(p: std::path::PathBuf) -> Node {
+    for _ in 0..50 {
+        if let Ok((n, mut rx)) = Node::start(&p).await {
+            tokio::spawn(async move { while rx.recv().await.is_some() {} });
+            return n;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    panic!("database never released");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn member_profiles_sync_and_survive_offline() {
+    let dir = tempfile::tempdir().unwrap();
+    let (a, b, outsider) = (node(&dir, "ayse").await, node(&dir, "berk").await, node(&dir, "cem").await);
+    let (aid, bid) = (a.id(), b.id());
+    let mut photo = Vec::new();
+    image_webp::WebPEncoder::new(&mut photo)
+        .encode(&[95; 192 * 192 * 3], 192, 192, image_webp::ColorType::Rgb8)
+        .unwrap();
+    let encoded = data_encoding::BASE64.encode(&photo);
+    let hash = Id(*blake3::hash(&photo).as_bytes());
+    assert!(a.update_profile("degismemeli", 0x1000000, "", PhotoEdit::Keep).is_err());
+    assert!(a.update_profile("degismemeli", 0, "", PhotoEdit::Replace("AAAA".into())).is_err());
+    assert_eq!(a.snapshot().me.name, "ayse");
+
+    a.update_profile("Ayşe", 0x81a1ff, "Merhaba", PhotoEdit::Replace(encoded.clone())).unwrap();
+    b.update_profile("Berk", 0xefab71, "", PhotoEdit::Keep).unwrap();
+    let space = a.create_space("Profil").unwrap();
+    b.join_space(&a.create_invite(space, None, None).unwrap()).await.unwrap();
+    until("both members see independent profiles and the photo", || {
+        b.snapshot().profiles.get(&aid).is_some_and(|p| p.photo == Some(hash) && p.orb_color == 0x81a1ff && p.bio == "Merhaba")
+            && a.snapshot().profiles.get(&bid).is_some_and(|p| p.orb_color == 0xefab71)
+    }).await;
+    assert_eq!(b.profile_photo(aid, hash).unwrap(), encoded);
+    assert!(outsider.profile_photo(aid, hash).is_err());
+    assert!(!outsider.snapshot().profiles.contains_key(&aid));
+
+    a.update_profile("Ayşe", 0x72c4a1, "Güncel", PhotoEdit::Keep).unwrap();
+    until("color and bio change without replacing the cached photo", || {
+        b.snapshot().profiles.get(&aid).is_some_and(|p| p.photo == Some(hash) && p.orb_color == 0x72c4a1 && p.bio == "Güncel")
+    }).await;
+
+    b.shutdown().await;
+    drop(b);
+    a.update_profile("Ayşe", 0x72c4a1, "", PhotoEdit::Remove).unwrap();
+    a.shutdown().await;
+    drop(a);
+    let b = restart(dir.path().join("berk")).await;
+    assert_eq!(b.profile_photo(aid, hash).unwrap(), encoded);
+    assert_eq!(b.snapshot().profiles[&aid].bio, "Güncel");
+
+    let a = restart(dir.path().join("ayse")).await;
+    until("reconnect supplies the latest profile and clears the former photo", || {
+        b.snapshot().profiles.get(&aid).is_some_and(|p| p.photo.is_none() && p.bio.is_empty())
+    }).await;
+    assert!(b.profile_photo(aid, hash).is_err());
+    assert_eq!(a.snapshot().me.name, "Ayşe");
+    for n in [a, b, outsider] {
+        n.shutdown().await;
+    }
 }
 
 fn text_channel(n: &Node, s: Id) -> Id {
@@ -49,7 +112,9 @@ async fn space_lifecycle() {
 
     let s = a.create_space("Kanka").unwrap();
     let ch = text_channel(&a, s);
+    let voice = voice_channel(&a, s);
     a.send_message(s, ch, "selam", None).unwrap();
+    a.send_message(s, voice, "odayı açtım", None).unwrap();
 
     let code = a.create_invite(s, Some(3_600_000), Some(5)).unwrap();
     assert_eq!(b.join_space(&code).await.unwrap(), s);
@@ -59,11 +124,22 @@ async fn space_lifecycle() {
             .unwrap_or(false)
     })
     .await;
+    until("b sees voice chat history without joining voice", || {
+        b.messages(s, voice, None, 50)
+            .is_ok_and(|m| m.len() == 1 && m[0].text == "odayı açtım")
+    })
+    .await;
 
     // live chat both ways
     b.send_message(s, ch, "naber", None).unwrap();
+    b.send_message(s, voice, "birazdan geliyorum", None).unwrap();
     until("a gets b's message", || {
         a.messages(s, ch, None, 50).unwrap().len() == 2
+    })
+    .await;
+    until("a gets b's voice chat message", || {
+        a.messages(s, voice, None, 50)
+            .is_ok_and(|m| m.len() == 2 && m.iter().any(|m| m.text == "birazdan geliyorum"))
     })
     .await;
 
@@ -247,17 +323,6 @@ async fn survives_restart_and_relay_only() {
     b.shutdown().await;
     drop((a, b));
 
-    // background tasks notice the closed endpoint within a tick and release the database
-    async fn restart(p: std::path::PathBuf) -> Node {
-        for _ in 0..50 {
-            if let Ok((n, mut rx)) = Node::start(&p).await {
-                tokio::spawn(async move { while rx.recv().await.is_some() {} });
-                return n;
-            }
-            tokio::time::sleep(Duration::from_millis(200)).await;
-        }
-        panic!("database never released");
-    }
     let a = restart(dir.path().join("ayse")).await;
     let b = restart(dir.path().join("berk")).await;
     assert_eq!((a.id(), b.id()), (aid, bid), "identity survives");

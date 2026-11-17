@@ -1,5 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowDown, Ban, CornerUpLeft, Hash, Pencil, Trash2, X } from "lucide-react";
+import { ArrowDown, Ban, CornerUpLeft, Hash, MessageSquare, Pencil, Send, Trash2, X } from "lucide-react";
 import { call, type ChannelView, type Id, type MessageView, type SpaceView } from "@/ipc";
 import { emptyMsgs, useApp } from "@/state/store";
 import { has, memberOf, nameOf } from "@/lib/space";
@@ -7,21 +7,22 @@ import { dayLabel, full, hhmm } from "@/lib/time";
 import { copy, fail } from "@/lib/actions";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Avatar, Empty } from "./common";
+import { Avatar, Empty, IconBtn } from "./common";
 
 const MAX_LEN = 4000;
 const GROUP_MS = 5 * 60_000;
 const DOM_CAP = 300;
 
-export function ChatView({ space, channel }: { space: SpaceView; channel: ChannelView }) {
+export function ChatView({ space, channel, open = true }: { space: SpaceView; channel: ChannelView; open?: boolean }) {
   const msgs = useApp((s) => s.msgs[channel.id] ?? emptyMsgs);
   const meId = useApp((s) => s.snap!.me.id);
+  const voice = channel.kind === "voice";
   const [replyTo, setReplyTo] = useState<MessageView | null>(null);
   const [editing, setEditing] = useState<Id | null>(null);
 
   useEffect(() => {
-    void useApp.getState().loadMessages(space.id, channel.id);
-  }, [space.id, channel.id]);
+    if (open) void useApp.getState().loadMessages(space.id, channel.id);
+  }, [open, space.id, channel.id]);
 
   const lastOwn = useMemo(() => {
     for (let i = msgs.items.length - 1; i >= 0; i--) {
@@ -33,10 +34,10 @@ export function ChatView({ space, channel }: { space: SpaceView; channel: Channe
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {!msgs.loaded ? (
+      {!open ? null : !msgs.loaded ? (
         <TimelineSkeleton />
       ) : msgs.error && msgs.items.length === 0 ? (
-        <div className="grid flex-1 place-items-center">
+        <div className="grid min-h-0 flex-1 place-items-center overflow-y-auto">
           <Empty title="Mesajlar yüklenemedi" body={msgs.error}>
             <button className="mt-1 text-xs text-copper hover:underline" onClick={() => void useApp.getState().loadMessages(space.id, channel.id)}>
               Tekrar dene
@@ -44,8 +45,12 @@ export function ChatView({ space, channel }: { space: SpaceView; channel: Channe
           </Empty>
         </div>
       ) : msgs.items.length === 0 ? (
-        <div className="grid flex-1 place-items-center">
-          <Empty icon={<Hash className="size-6" />} title={`#${channel.name} kanalının başı`} body="Henüz kimse yazmadı. İlk mesajı sen at." />
+        <div className="grid min-h-0 flex-1 place-items-center overflow-y-auto">
+          <Empty
+            icon={voice ? <MessageSquare className="size-5" /> : <Hash className="size-6" />}
+            title={voice ? "Henüz mesaj yok" : `#${channel.name} kanalının başı`}
+            body={voice ? undefined : "Henüz kimse yazmadı. İlk mesajı sen at."}
+          />
         </div>
       ) : (
         <Timeline
@@ -160,7 +165,7 @@ function Timeline(props: {
     <div className="relative min-h-0 flex-1">
       <div ref={ref} onScroll={onScroll} className="h-full overflow-y-auto [overflow-anchor:none]">
         <div className="flex min-h-full flex-col justify-end pt-6 pb-3">
-          {!hasMore && (
+          {!hasMore && channel.kind === "text" && (
             <div className="px-4 pb-4">
               <div className="text-[15px] font-semibold tracking-tight">#{channel.name}</div>
               <div className="text-xs text-ink-3">Kanalın başı. Bu mesajlar yalnızca halkadakilerin cihazlarında duruyor.</div>
@@ -303,7 +308,14 @@ const MessageRow = memo(function MessageRow({
         ) : null}
         {head && (
           <div className="flex items-baseline gap-2">
-            <span className="text-[13px] font-medium tracking-tight text-ink-1">{name}</span>
+            {author ? (
+              <button
+                type="button"
+                aria-haspopup="dialog"
+                onClick={(e) => useApp.getState().openProfile(m.author, space.id, e.currentTarget)}
+                className="rounded-sm text-left text-[13px] font-medium tracking-tight text-ink-1 hover:underline"
+              >{name}</button>
+            ) : <span className="text-[13px] font-medium tracking-tight text-ink-1">{name}</span>}
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className="num text-2xs text-ink-3">{hhmm(m.ts)}</span>
@@ -464,7 +476,7 @@ function Composer({
             value={text}
             rows={1}
             disabled={!canSend}
-            placeholder={canSend ? `#${channel.name} kanalına yaz` : "Bu kanalda yazma iznin yok"}
+            placeholder={!canSend ? "Bu kanalda yazma iznin yok" : channel.kind === "voice" ? "Odaya mesaj yaz" : `#${channel.name} kanalına yaz`}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -478,7 +490,10 @@ function Composer({
                 clearReply();
               }
             }}
-            className="block max-h-48 min-h-5 flex-1 resize-none bg-transparent text-[13px] leading-5 text-ink-1 outline-none [field-sizing:content] placeholder:text-ink-3 disabled:cursor-not-allowed"
+            className={cn(
+              "block min-h-5 min-w-0 flex-1 resize-none bg-transparent text-[13px] leading-5 text-ink-1 outline-none [field-sizing:content] placeholder:text-ink-3 disabled:cursor-not-allowed",
+              channel.kind === "voice" ? "max-h-20" : "max-h-48",
+            )}
             aria-label="Mesaj"
           />
           {text.length > MAX_LEN - 500 && (
@@ -486,9 +501,14 @@ function Composer({
               {text.length}/{MAX_LEN}
             </span>
           )}
+          {channel.kind === "voice" && (
+            <IconBtn label="Mesaj gönder" className="-my-1 -mr-1 shrink-0 text-copper" onClick={send} disabled={!canSend || !text.trim() || over}>
+              <Send />
+            </IconBtn>
+          )}
         </div>
       </div>
-      <div className="mt-1 flex h-4 items-center gap-3 px-1 text-[10.5px] text-ink-3">
+      <div className={cn("mt-1 flex h-4 items-center gap-3 px-1 text-[10.5px] text-ink-3", channel.kind === "voice" && "hidden")}>
         <span>
           <kbd className="kbd">Enter</kbd> gönder
         </span>

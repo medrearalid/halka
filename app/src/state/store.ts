@@ -31,16 +31,19 @@ interface AppState extends Persisted {
   msgs: Record<Id, ChannelMsgs>;
   toasts: Toast[];
   localStream: MediaStream | null;
-  dialog: { kind: DialogKind; tab?: string } | null;
+  dialog: { kind: DialogKind; tab?: string } | { kind: "profile"; member: Id; space: Id | null; trigger: HTMLElement | null } | null;
   palette: boolean;
+  voiceChatOpen: boolean;
 
   select(space: Id, channel?: Id | null): void;
   toast(kind: Toast["kind"], text: string): void;
   dismissToast(id: number): void;
   openDialog(kind: DialogKind, tab?: string): void;
+  openProfile(member: Id, space?: Id | null, trigger?: HTMLElement): void;
   closeDialog(): void;
   setMembersOpen(v: boolean): void;
   setPalette(v: boolean): void;
+  setVoiceChatOpen(v: boolean): void;
   setPeerVolume(member: Id, v: number): void;
   loadMessages(space: Id, channel: Id, older?: boolean): Promise<void>;
   trimMessages(channel: Id, keep: number): void;
@@ -77,6 +80,7 @@ export const useApp = create<AppState>()((set, get) => ({
   localStream: null,
   dialog: null,
   palette: false,
+  voiceChatOpen: true,
 
   select(space, channel) {
     pending = { space, channel: channel ?? null, until: Date.now() + 5000 };
@@ -95,6 +99,10 @@ export const useApp = create<AppState>()((set, get) => ({
   openDialog(kind, tab) {
     set({ dialog: { kind, tab }, palette: false });
   },
+  openProfile(member, space = get().space, trigger) {
+    const active = document.activeElement;
+    set({ dialog: { kind: "profile", member, space, trigger: trigger ?? (active instanceof HTMLElement ? active : null) }, palette: false });
+  },
   closeDialog() {
     set({ dialog: null });
   },
@@ -103,6 +111,9 @@ export const useApp = create<AppState>()((set, get) => ({
   },
   setPalette(palette) {
     set({ palette });
+  },
+  setVoiceChatOpen(voiceChatOpen) {
+    set({ voiceChatOpen });
   },
   setPeerVolume(member, v) {
     set((s) => ({ peerVolume: { ...s.peerVolume, [member]: v } }));
@@ -172,13 +183,20 @@ useApp.subscribe((s, p) => {
 });
 
 let readTimer = 0;
+
+function visibleChat(s: AppState) {
+  const ch = s.snap?.spaces.find((x) => x.id === s.space)?.channels.find((c) => c.id === s.channel);
+  return ch?.kind === "voice" && !s.voiceChatOpen ? undefined : ch;
+}
+
 /** `messages` marks a channel read; ping it when a message lands in the channel on screen. */
 function markReadSoon(space: Id, channel: Id) {
   clearTimeout(readTimer);
-  readTimer = window.setTimeout(
-    () => void call("messages", { space, channel, before: null, limit: 1 }).catch(() => {}),
-    600,
-  );
+  readTimer = window.setTimeout(() => {
+    const s = useApp.getState();
+    if (s.space === space && visibleChat(s)?.id === channel && document.hasFocus())
+      void call("messages", { space, channel, before: null, limit: 1 }).catch(() => {});
+  }, 600);
 }
 
 export async function boot() {
@@ -192,13 +210,13 @@ export async function boot() {
     if (cur?.loaded) {
       useApp.setState({ msgs: { ...s.msgs, [m.channel]: { ...cur, items: mergeMessages(cur.items, [m]) } } });
     }
-    if (m.channel === s.channel && document.hasFocus()) markReadSoon(m.space, m.channel);
+    if (m.channel === visibleChat(s)?.id && document.hasFocus()) markReadSoon(m.space, m.channel);
   });
   on("notice", (n) => useApp.getState().toast(n.kind, n.text));
   window.addEventListener("focus", () => {
     const s = useApp.getState();
-    const ch = s.snap?.spaces.find((x) => x.id === s.space)?.channels.find((c) => c.id === s.channel);
-    if (s.space && ch?.kind === "text" && ch.unread > 0) markReadSoon(s.space, ch.id);
+    const ch = visibleChat(s);
+    if (s.space && ch && ch.unread > 0) markReadSoon(s.space, ch.id);
   });
   try {
     const snap = await call("snapshot");

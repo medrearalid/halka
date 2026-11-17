@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, ChevronsUpDown, Copy, Mic, ShieldCheck, User, X } from "lucide-react";
+import { Check, ChevronsUpDown, Mic, ShieldCheck, User, X } from "lucide-react";
 import { call, type AudioDevices, type Settings } from "@/ipc";
 import { useApp } from "@/state/store";
 import { levelRef } from "@/lib/levels";
-import { copy, fail } from "@/lib/actions";
+import { fail } from "@/lib/actions";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -11,7 +11,6 @@ import { Slider } from "@/components/ui/slider";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Avatar, Field } from "./common";
 import { Group, PaneTitle, Row, SettingsLayout, type Tab } from "./SettingsLayout";
-import { useSubmit } from "./forms";
 
 type TabId = "profile" | "audio" | "privacy";
 const TABS: Tab<TabId>[] = [
@@ -47,38 +46,16 @@ export function AppSettings() {
 
 function Profile() {
   const me = useApp((s) => s.snap!.me);
-  const [name, setName] = useState(me.name);
-  const save = useSubmit(() => call("set_name", { name: name.trim() }));
   return (
     <>
       <PaneTitle title="Profil" />
       <Group>
-        <div className="flex items-end gap-3 py-3">
-          <Avatar id={me.id} name={name || me.name} size={40} />
-          <div className="min-w-0 flex-1">
-            <Field label="Görünen ad">
-              <input className="field" value={name} maxLength={32} onChange={(e) => setName(e.target.value)} />
-            </Field>
-          </div>
-          <Button disabled={!name.trim() || name.trim() === me.name} aria-busy={save.busy} onClick={() => void save.run()}>
-            Kaydet
+        <div className="flex items-center gap-3 py-3">
+          <Avatar id={me.id} name={me.name} size={40} />
+          <span className="min-w-0 flex-1 truncate text-sm font-medium">{me.name}</span>
+          <Button variant="secondary" onClick={(e) => useApp.getState().openProfile(me.id, undefined, e.currentTarget)}>
+            <User /> Profili aç
           </Button>
-        </div>
-        {save.error && <p className="pb-2 text-xs text-danger">{save.error}</p>}
-      </Group>
-      <Group title="Güvenlik kodu">
-        <div className="py-3">
-          <div className="flex items-center gap-3">
-            <code className="num font-mono text-[20px] font-medium tracking-[0.08em] text-ink-1" data-selectable>
-              {me.code}
-            </code>
-            <Button size="sm" variant="ghost" onClick={() => void copy(me.code, "Güvenlik kodu kopyalandı")}>
-              <Copy /> Kopyala
-            </Button>
-          </div>
-          <p className="mt-2 max-w-[52ch] text-xs text-ink-3">
-            Arkadaşınla bu kodu karşılaştır; aynıysa bağlantın doğrudan ona. Kod, cihazındaki anahtardan üretilir ve değişmez.
-          </p>
         </div>
       </Group>
     </>

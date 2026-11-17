@@ -194,6 +194,7 @@ function VoiceRow({ space, c, active, joined }: { space: SpaceView; c: ChannelVi
         <Volume2 className={cn("size-3.5 shrink-0", joined ? "text-live" : "text-ink-3")} />
         <span className="min-w-0 flex-1 truncate">{c.name}</span>
         {c.private_roles && <Lock className="size-3 text-ink-3" />}
+        {c.unread > 0 && <span className="size-1.5 shrink-0 rounded-full bg-copper" role="img" aria-label="Okunmamış mesajlar" />}
         {live && (
           <span className="flex items-center gap-1">
             <span className="flex -space-x-1">
@@ -264,11 +265,19 @@ function UserBar() {
   const online = useApp((s) => s.snap!.online);
   return (
     <div className="flex h-12 shrink-0 items-center gap-2 border-t border-line px-2.5">
-      <Avatar id={me.id} name={me.name} size={26} online={online} />
-      <div className="min-w-0 flex-1 leading-tight">
-        <div className="truncate text-[13px] font-medium tracking-tight">{me.name}</div>
-        <div className="truncate text-2xs text-ink-3">{online ? "Çevrimiçi" : "Ağa bağlanılıyor…"}</div>
-      </div>
+      <button
+        type="button"
+        aria-label="Profilim"
+        aria-haspopup="dialog"
+        onClick={(e) => useApp.getState().openProfile(me.id, undefined, e.currentTarget)}
+        className="flex min-w-0 flex-1 items-center gap-2 rounded-md p-1 text-left hover:bg-paper-2"
+      >
+        <Avatar id={me.id} name={me.name} size={26} online={online} />
+        <span className="min-w-0 flex-1 leading-tight">
+          <span className="block truncate text-[13px] font-medium tracking-tight">{me.name}</span>
+          <span className="block truncate text-2xs text-ink-3">{online ? "Çevrimiçi" : "Ağa bağlanılıyor…"}</span>
+        </span>
+      </button>
       <IconBtn label="Ayarlar" onClick={() => useApp.getState().openDialog("app-settings")}>
         <Settings />
       </IconBtn>
