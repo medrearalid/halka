@@ -6,8 +6,9 @@ declare const MediaStreamTrackProcessor: {
 };
 
 type In =
-  | { type: "start"; track?: MediaStreamTrack; readable?: ReadableStream<VideoFrame>; framerate: number }
+  | { type: "start"; track?: MediaStreamTrack; readable?: ReadableStream<VideoFrame>; framerate: number; bitrate?: number }
   | { type: "key" }
+  | { type: "congestion" }
   | { type: "stop" };
 
 const self_ = self as unknown as DedicatedWorkerGlobalScope;
@@ -24,9 +25,11 @@ self_.onmessage = (e: MessageEvent<In>) => {
       (pkt) => self_.postMessage({ type: "packet", pkt }, [pkt]),
       (msg) => self_.postMessage({ type: "error", msg }),
       m.framerate,
+      m.bitrate,
     );
     loop.done.then(() => self_.postMessage({ type: "ended" }));
   } else if (m.type === "key") loop?.requestKeyFrame();
+  else if (m.type === "congestion") loop?.congestion();
   else if (m.type === "stop") {
     loop?.stop();
     track?.stop(); // the transferred clone is a live capture of its own

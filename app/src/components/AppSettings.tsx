@@ -176,7 +176,7 @@ function Audio() {
         </div>
       </Group>
       <Group title="İşleme">
-        <Row label="Gürültü bastırma" desc="Klavye ve fan sesini azaltır.">
+        <Row label="Akıllı gürültü engelleme" desc="Yapay zekâ (RNNoise) yalnızca konuşmayı geçirir; klavye, fare ve fan sesi gönderilmez.">
           <Switch checked={settings.noise_suppression} onCheckedChange={(v) => saveSettings({ noise_suppression: v })} aria-label="Gürültü bastırma" />
         </Row>
         <Row label="Yankı engelleme" desc="Hoparlör kullanıyorsan açık tut.">

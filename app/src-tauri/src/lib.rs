@@ -18,17 +18,17 @@ fn e(err: anyhow::Error) -> String {
     format!("{err:#}")
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn snapshot(n: State<Node>) -> Snapshot {
     n.snapshot()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_name(n: State<Node>, name: String) -> R<()> {
     n.set_name(&name).map_err(e)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn create_space(n: State<Node>, name: String) -> R<Id> {
     n.create_space(&name).map_err(e)
 }
@@ -39,12 +39,12 @@ async fn join_space(n: State<'_, Node>, code: String) -> R<Id> {
     n.join_space(&code).await.map_err(e)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn leave_space(n: State<Node>, space: Id) -> R<()> {
     n.leave_space(space).map_err(e)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn rename_space(n: State<Node>, space: Id, name: String) -> R<()> {
     n.op(
         space,
@@ -56,7 +56,7 @@ fn rename_space(n: State<Node>, space: Id, name: String) -> R<()> {
     .map_err(e)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn create_invite(
     n: State<Node>,
     space: Id,
@@ -66,14 +66,14 @@ fn create_invite(
     n.create_invite(space, expires_in_ms, max_uses).map_err(e)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn revoke_invite(n: State<Node>, space: Id, invite: Id) -> R<()> {
     n.op(space, OpBody::RevokeInvite { key: invite })
         .map(|_| ())
         .map_err(e)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn create_channel(
     n: State<Node>,
     space: Id,
@@ -92,7 +92,7 @@ fn create_channel(
     .map_err(e)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn update_channel(
     n: State<Node>,
     space: Id,
@@ -112,14 +112,14 @@ fn update_channel(
     .map_err(e)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn delete_channel(n: State<Node>, space: Id, channel: Id) -> R<()> {
     n.op(space, OpBody::DeleteChannel { channel })
         .map(|_| ())
         .map_err(e)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn create_role(
     n: State<Node>,
     space: Id,
@@ -141,7 +141,7 @@ fn create_role(
     .map_err(e)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn update_role(
     n: State<Node>,
     space: Id,
@@ -166,33 +166,33 @@ fn update_role(
     .map_err(e)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn delete_role(n: State<Node>, space: Id, role: Id) -> R<()> {
     n.op(space, OpBody::DeleteRole { role })
         .map(|_| ())
         .map_err(e)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn assign_role(n: State<Node>, space: Id, member: Id, role: Id, on: bool) -> R<()> {
     n.op(space, OpBody::AssignRole { member, role, on })
         .map(|_| ())
         .map_err(e)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn kick(n: State<Node>, space: Id, member: Id) -> R<()> {
     n.op(space, OpBody::Kick { member }).map(|_| ()).map_err(e)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn ban(n: State<Node>, space: Id, member: Id, on: bool) -> R<()> {
     n.op(space, OpBody::Ban { member, on })
         .map(|_| ())
         .map_err(e)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn messages(
     n: State<Node>,
     space: Id,
@@ -203,7 +203,7 @@ fn messages(
     n.messages(space, channel, before, limit).map_err(e)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn send_message(
     n: State<Node>,
     space: Id,
@@ -214,67 +214,67 @@ fn send_message(
     n.send_message(space, channel, &text, reply_to).map_err(e)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn edit_message(n: State<Node>, space: Id, message: Id, text: String) -> R<()> {
     n.edit_message(space, message, &text).map_err(e)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn delete_message(n: State<Node>, space: Id, message: Id) -> R<()> {
     n.delete_message(space, message).map_err(e)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn voice_join(n: State<Node>, space: Id, channel: Id) -> R<()> {
     n.voice_join(space, channel).map_err(e)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn voice_leave(n: State<Node>) {
     n.voice_leave()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_muted(n: State<Node>, muted: bool) -> R<()> {
     n.set_muted(muted).map_err(e)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_deafened(n: State<Node>, deafened: bool) -> R<()> {
     n.set_deafened(deafened).map_err(e)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_ptt(n: State<Node>, down: bool) {
     n.set_ptt(down)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_peer_volume(n: State<Node>, member: Id, volume: f32) {
     n.set_peer_volume(member, volume)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn mic_test(n: State<Node>, on: bool) -> R<()> {
     n.mic_test(on).map_err(e)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn audio_devices(n: State<Node>) -> AudioDevices {
     n.audio_devices()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_audio_devices(n: State<Node>, input: Option<String>, output: Option<String>) -> R<()> {
     n.set_audio_devices(input, output).map_err(e)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_settings(n: State<Node>) -> Settings {
     n.settings()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_settings(n: State<Node>, mut settings: Settings) -> R<()> {
     // devices are owned by set_audio_devices; the UI's Settings shape doesn't carry them
     let cur = n.settings();
@@ -282,13 +282,13 @@ fn set_settings(n: State<Node>, mut settings: Settings) -> R<()> {
     n.set_settings(settings).map_err(e)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn stream_start(n: State<Node>) -> R<()> {
     n.stream_start().map_err(e)
 }
 
 /// Raw binary body (no JSON): one stream packet from the encoder.
-#[tauri::command]
+#[tauri::command(async)]
 fn stream_packet(n: State<Node>, request: Request<'_>) -> R<()> {
     match request.body() {
         InvokeBody::Raw(b) => n.stream_packet(b.clone()).map_err(e),
@@ -296,12 +296,12 @@ fn stream_packet(n: State<Node>, request: Request<'_>) -> R<()> {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn stream_stop(n: State<Node>) {
     n.stream_stop()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn watch(n: State<Node>, member: Id, channel: Channel<InvokeResponseBody>) -> R<()> {
     let sink = Arc::new(move |pkt: Vec<u8>| {
         let _ = channel.send(InvokeResponseBody::Raw(pkt));
@@ -309,7 +309,7 @@ fn watch(n: State<Node>, member: Id, channel: Channel<InvokeResponseBody>) -> R<
     n.watch(member, sink).map_err(e)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn unwatch(n: State<Node>, member: Id) {
     n.unwatch(member)
 }
@@ -348,6 +348,7 @@ async fn pump(app: AppHandle, node: Node, mut rx: tokio::sync::mpsc::UnboundedRe
             ),
             Event::StreamEnded(m) => app.emit("stream_ended", json!({ "member": m })),
             Event::StreamKeyframe => app.emit("stream_keyframe", json!({})),
+            Event::StreamCongested => app.emit("stream_congestion", json!({})),
         };
     }
 }
@@ -369,13 +370,35 @@ fn profile() -> Option<String> {
 /// Keep capture/encode alive while the window is hidden or occluded (sharing a game, etc.).
 const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,CalculateNativeWinOcclusion --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows";
 
+fn show_main(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    }
+}
+
 pub fn run() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
             std::env::var("RUST_LOG").unwrap_or_else(|_| "warn,halka_core=info".into()),
         )
         .try_init();
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+    if profile().is_none() {
+        // launching Halka again brings the (possibly tray-hidden) window back
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            show_main(app)
+        }));
+    }
+    builder
+        .on_window_event(|w, e| {
+            // the close button keeps Halka running in the tray (voice stays connected)
+            if let tauri::WindowEvent::CloseRequested { api, .. } = e {
+                api.prevent_close();
+                let _ = w.hide();
+            }
+        })
         .setup(|app| {
             let mut dir = app.path().app_data_dir()?;
             if let Some(p) = profile().filter(|p| {
@@ -401,6 +424,43 @@ pub fn run() {
                 .data_directory(dir.join("webview"))
                 .additional_browser_args(BROWSER_ARGS)
                 .build()?;
+            let menu = tauri::menu::Menu::with_items(
+                app,
+                &[
+                    &tauri::menu::MenuItem::with_id(
+                        app,
+                        "show",
+                        "Halka'yı aç",
+                        true,
+                        None::<&str>,
+                    )?,
+                    &tauri::menu::PredefinedMenuItem::separator(app)?,
+                    &tauri::menu::MenuItem::with_id(app, "quit", "Çıkış", true, None::<&str>)?,
+                ],
+            )?;
+            let mut tray = tauri::tray::TrayIconBuilder::with_id("main")
+                .tooltip("Halka")
+                .menu(&menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, e| match e.id().as_ref() {
+                    "show" => show_main(app),
+                    "quit" => app.exit(0),
+                    _ => {}
+                })
+                .on_tray_icon_event(|t, e| {
+                    if let tauri::tray::TrayIconEvent::Click {
+                        button: tauri::tray::MouseButton::Left,
+                        button_state: tauri::tray::MouseButtonState::Up,
+                        ..
+                    } = e
+                    {
+                        show_main(t.app_handle());
+                    }
+                });
+            if let Some(icon) = app.default_window_icon() {
+                tray = tray.icon(icon.clone());
+            }
+            tray.build(app)?;
             app.manage(node.clone());
             tauri::async_runtime::spawn(pump(app.handle().clone(), node, rx));
             Ok(())

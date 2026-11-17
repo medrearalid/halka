@@ -11,7 +11,7 @@ export function bitrateFor(w: number, h: number): number {
   return Math.round(Math.min(8e6, Math.max(1e6, (5e6 * w * h) / (1920 * 1080))));
 }
 
-export async function pickEncoderConfig(width: number, height: number, framerate: number): Promise<VideoEncoderConfig | null> {
+export async function pickEncoderConfig(width: number, height: number, framerate: number, bitrate?: number): Promise<VideoEncoderConfig | null> {
   // H.264 needs even dimensions
   const w = width & ~1, h = height & ~1;
   for (const c of CANDIDATES) {
@@ -19,7 +19,7 @@ export async function pickEncoderConfig(width: number, height: number, framerate
       codec: c.codec,
       width: w,
       height: h,
-      bitrate: bitrateFor(w, h),
+      bitrate: bitrate ?? bitrateFor(w, h),
       bitrateMode: "variable",
       framerate,
       latencyMode: "realtime",

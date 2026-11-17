@@ -23,8 +23,17 @@ const RATE: u32 = 48_000;
 const FRAME10: usize = 480;
 const FRAME20: usize = 960;
 /// Jitter buffer: start playing once this much is queued, cap queue at MAX to bound latency.
-const PRIME: usize = FRAME20 * 2;
-const MAX_QUEUE: usize = FRAME20 * 10;
+/// Adaptive jitter buffer: start playing after `target` samples are queued. The target starts
+/// at one packet (lowest latency), grows on underruns and shrinks again after calm periods.
+const TARGET_MIN: usize = FRAME20;
+const TARGET_MAX: usize = FRAME20 * 5;
+/// Anything queued beyond target + this is stale latency and gets dropped.
+const SLACK: usize = FRAME20 * 3;
+const CALM_SAMPLES: usize = RATE as usize * 8;
+/// RNNoise speech probability needed to open the voice gate.
+const VAD_SPEECH: f32 = 0.6;
+/// 20 ms frames kept while the gate is shut and sent when it opens.
+const PREROLL_FRAMES: usize = 2;
 /// Voice-activity hangover so word endings aren't clipped.
 const HANGOVER_FRAMES: u32 = 20;
 
@@ -50,6 +59,8 @@ struct Peer {
     volume: f32,
     pan: f32,
     level: f32,
+    target: usize,
+    calm: usize,
     /// Raw received loudness (dBFS), unclamped: diagnostics and tests.
     db: f32,
 }
@@ -207,14 +218,44 @@ fn level_of(frame: &[f32]) -> f32 {
     ((db + 60.0) / 60.0).clamp(0.0, 1.0)
 }
 
-fn apm_config(ns: bool, aec: bool) -> sonora::Config {
+/// First stage: echo cancellation + high-pass. Noise suppression (RNNoise) and gain control
+/// run after it, so the denoiser never sees echo and the AGC never amplifies noise.
+fn apm_config(aec: bool) -> sonora::Config {
     sonora::Config {
         echo_canceller: aec.then(Default::default),
-        noise_suppression: ns.then(Default::default),
-        gain_controller2: Some(Default::default()),
         high_pass_filter: Some(Default::default()),
         ..Default::default()
     }
+}
+
+fn agc_config() -> sonora::Config {
+    sonora::Config {
+        gain_controller2: Some(Default::default()),
+        ..Default::default()
+    }
+}
+
+fn apm(config: sonora::Config) -> sonora::AudioProcessing {
+    sonora::AudioProcessing::builder()
+        .config(config)
+        .capture_config(sonora::StreamConfig::new(RATE, 1))
+        .render_config(sonora::StreamConfig::new(RATE, 1))
+        .build()
+}
+
+/// RNNoise (recurrent neural network denoiser) on one 10 ms frame, in place.
+/// Returns its speech probability for the frame.
+fn denoise(rnn: &mut nnnoiseless::DenoiseState, frame: &mut [f32; FRAME10]) -> f32 {
+    let mut scaled = [0f32; FRAME10];
+    for (o, i) in scaled.iter_mut().zip(frame.iter()) {
+        *o = i * 32768.0; // RNNoise works in 16-bit sample units
+    }
+    let mut out = [0f32; FRAME10];
+    let vad = rnn.process_frame(&mut out, &scaled);
+    for (o, i) in frame.iter_mut().zip(out) {
+        *o = i / 32768.0;
+    }
+    vad
 }
 
 impl Voice {
@@ -463,6 +504,8 @@ fn receive_into(sh: &Shared, peer: Id, dg: &[u8]) {
                     volume,
                     pan,
                     level: 0.0,
+                    target: TARGET_MIN,
+                    calm: 0,
                     db: -200.0,
                 })
             }
@@ -490,8 +533,8 @@ fn receive_into(sh: &Shared, peer: Id, dg: &[u8]) {
             #[cfg(feature = "test-tone")]
             test_support::RECORDING.lock().extend_from_slice(&pcm[..n]);
         }
-        if p.queue.len() > MAX_QUEUE {
-            let drop = p.queue.len() - PRIME;
+        if p.queue.len() > p.target + SLACK {
+            let drop = p.queue.len() - p.target;
             p.queue.drain(..drop);
         }
     }
@@ -507,7 +550,7 @@ fn mix(sh: &Shared, frames: usize, out: &mut Vec<f32>, reference: &mut impl Prod
         let mut m = sh.mixer.lock();
         for p in m.peers.values_mut() {
             if !p.primed {
-                p.primed = p.queue.len() >= PRIME;
+                p.primed = p.queue.len() >= p.target;
                 if !p.primed {
                     p.level *= 0.8;
                     continue;
@@ -518,13 +561,21 @@ fn mix(sh: &Shared, frames: usize, out: &mut Vec<f32>, reference: &mut impl Prod
             let mut energy = 0.0;
             for i in 0..frames {
                 let Some(s) = p.queue.pop_front() else {
+                    // underrun: this link needs more cushion
                     p.primed = false;
+                    p.target = (p.target + FRAME20).min(TARGET_MAX);
+                    p.calm = 0;
                     break;
                 };
                 energy += s * s;
                 out[i * 2] += s * gl;
                 out[i * 2 + 1] += s * gr;
                 mono[i] += s * p.volume;
+            }
+            p.calm += frames;
+            if p.calm > CALM_SAMPLES {
+                p.calm = 0;
+                p.target = p.target.saturating_sub(FRAME10).max(TARGET_MIN);
             }
             let rms = (energy / frames as f32).sqrt();
             p.db = 20.0 * rms.max(1e-10).log10();
@@ -559,11 +610,11 @@ fn process(
     send: SendFn,
 ) {
     let (mut ns, mut aec) = (sh.ns.load(Relaxed), sh.aec.load(Relaxed));
-    let mut apm = sonora::AudioProcessing::builder()
-        .config(apm_config(ns, aec))
-        .capture_config(sonora::StreamConfig::new(RATE, 1))
-        .render_config(sonora::StreamConfig::new(RATE, 1))
-        .build();
+    let mut front = apm(apm_config(aec));
+    let mut agc = apm(agc_config());
+    let mut rnn = nnnoiseless::DenoiseState::new();
+    let mut vad_max = 0f32;
+    let mut preroll: VecDeque<Vec<u8>> = VecDeque::new();
     let mut enc = match opus::Encoder::new(RATE, opus::Channels::Mono, opus::Application::Voip) {
         Ok(e) => e,
         Err(e) => return tracing::error!("opus: {e}"),
@@ -588,7 +639,7 @@ fn process(
         let (n2, a2) = (sh.ns.load(Relaxed), sh.aec.load(Relaxed));
         if (n2, a2) != (ns, aec) {
             (ns, aec) = (n2, a2);
-            apm.apply_config(apm_config(ns, aec));
+            front.apply_config(apm_config(aec));
         }
         cap.pop_slice(&mut inp);
         let got = reference.pop_slice(&mut rf);
@@ -596,9 +647,25 @@ fn process(
         while reference.occupied_len() > FRAME10 * 20 {
             reference.skip(FRAME10);
         }
-        let _ = apm.process_render_f32(&[&rf], &mut [&mut [0f32; FRAME10][..]]);
-        if apm.process_capture_f32(&[&inp], &mut [&mut outp]).is_err() {
+        let _ = front.process_render_f32(&[&rf], &mut [&mut [0f32; FRAME10][..]]);
+        if front
+            .process_capture_f32(&[&inp], &mut [&mut outp])
+            .is_err()
+        {
             outp = inp;
+        }
+        let vad = if ns {
+            denoise(&mut rnn, &mut outp)
+        } else {
+            1.0
+        };
+        vad_max = vad_max.max(vad);
+        let mut gained = [0f32; FRAME10];
+        if agc
+            .process_capture_f32(&[&outp], &mut [&mut gained])
+            .is_ok()
+        {
+            outp = gained;
         }
         frame20.extend_from_slice(&outp);
         if frame20.len() < FRAME20 {
@@ -611,23 +678,40 @@ fn process(
         } else if sh.push_to_talk.load(Relaxed) {
             sh.ptt_down.load(Relaxed) || key_down(sh.ptt_vk.load(Relaxed))
         } else {
-            if level >= f32::from_bits(sh.vad_threshold.load(Relaxed)) {
+            // with the denoiser on, the gate opens on actual speech, not on any loud sound
+            // (keyboard, mouse clicks, fans); the threshold stays a floor on loudness
+            let loud = level >= f32::from_bits(sh.vad_threshold.load(Relaxed));
+            if loud && (!ns || vad_max >= VAD_SPEECH) {
                 hang = HANGOVER_FRAMES;
             }
             hang = hang.saturating_sub(1);
             hang > 0
         };
         sh.transmitting.store(open, Relaxed);
-        if open && let Ok(n) = enc.encode_float(&frame20, &mut pkt[3..]) {
+        // Always encode, so the frames just before the gate opens exist: they are sent first
+        // (pre-roll) and the first syllable after a pause isn't clipped.
+        let encoded = enc.encode_float(&frame20, &mut pkt[3..]).ok().map(|n| {
             pkt[0] = DG_VOICE;
             pkt[1..3].copy_from_slice(&seq.to_le_bytes());
-            seq = seq.wrapping_add(1);
-            send(pkt[..3 + n].to_vec());
-        } else if !open {
-            // keep sequence moving so receivers see a gap > 4 (talk-spurt restart), not loss
-            seq = seq.wrapping_add(1);
+            pkt[..3 + n].to_vec()
+        });
+        // seq advances while silent too, so receivers see a talk-spurt restart, not loss
+        seq = seq.wrapping_add(1);
+        if let Some(p) = encoded {
+            if open {
+                preroll.drain(..).for_each(&send);
+                send(p);
+            } else if !sh.muted.load(Relaxed) && !sh.deafened.load(Relaxed) {
+                preroll.push_back(p);
+                if preroll.len() > PREROLL_FRAMES {
+                    preroll.pop_front();
+                }
+            } else {
+                preroll.clear();
+            }
         }
         frame20.clear();
+        vad_max = 0.0;
     }
 }
 
@@ -725,10 +809,12 @@ mod tests {
             receive_into(&sh, peer, &dg);
         }
         receive_into(&sh, peer, &[DG_VOICE, 1, 0, 0xff]); // late duplicate: ignored
-        assert_eq!(sh.mixer.lock().peers[&peer].queue.len(), FRAME20 * 6);
+        // a burst beyond target+slack is trimmed to the target: no built-up latency
+        let queued = sh.mixer.lock().peers[&peer].queue.len();
+        assert!((FRAME20..=TARGET_MIN + SLACK).contains(&queued), "{queued}");
         let (mut rb_tx, _rb_rx) = HeapRb::<f32>::new(RATE as usize).split();
         let mut out = Vec::new();
-        mix(&sh, FRAME20 * 4, &mut out, &mut rb_tx);
+        mix(&sh, queued, &mut out, &mut rb_tx);
         let (l, r): (f32, f32) = out
             .chunks(2)
             .fold((0.0, 0.0), |(l, r), c| (l + c[0].abs(), r + c[1].abs()));
@@ -740,7 +826,7 @@ mod tests {
     /// With AEC on, that echo must be strongly suppressed; with it off, it passes through.
     fn echo_residual_db(aec: bool) -> f32 {
         let mut apm = sonora::AudioProcessing::builder()
-            .config(apm_config(false, aec))
+            .config(apm_config(aec))
             .capture_config(sonora::StreamConfig::new(RATE, 1))
             .render_config(sonora::StreamConfig::new(RATE, 1))
             .build();
@@ -789,6 +875,32 @@ mod tests {
             "AEC should remove >20 dB of echo, got {on:.1} dB"
         );
         assert!(on < off - 15.0);
+    }
+
+    #[test]
+    fn rnnoise_removes_steady_noise() {
+        let mut rnn = nnnoiseless::DenoiseState::new();
+        let mut seed = 7u32;
+        let (mut e_in, mut e_out) = (0f64, 0f64);
+        for k in 0..300 {
+            let mut f = [0f32; FRAME10];
+            for x in f.iter_mut() {
+                seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+                *x = ((seed >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0) * 0.05;
+            }
+            let before: f64 = f.iter().map(|x| (*x as f64).powi(2)).sum();
+            let vad = denoise(&mut rnn, &mut f);
+            if k > 50 {
+                e_in += before;
+                e_out += f.iter().map(|x| (*x as f64).powi(2)).sum::<f64>();
+                assert!(vad < VAD_SPEECH, "white noise is not speech");
+            }
+        }
+        let db = 10.0 * (e_out / e_in).log10();
+        eprintln!("rnnoise on white noise: {db:.1} dB");
+        // broadband white noise is the hardest case for RNNoise; what matters most is that it is
+        // never classified as speech, so the voice gate stays shut and nothing is sent at all
+        assert!(db < -6.0, "{db}");
     }
 
     #[test]

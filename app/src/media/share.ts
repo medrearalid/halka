@@ -5,8 +5,19 @@ import { runEncoder } from "./encoder";
 
 type TrackProcessorCtor = new (init: { track: MediaStreamTrack }) => { readable: ReadableStream<VideoFrame> };
 
-const FPS = 30;
 const MAX_IN_FLIGHT = 8;
+
+export type ShareSurface = "monitor" | "window";
+export type SharePreset = "smooth" | "balanced" | "sharp";
+export const PRESETS: Record<SharePreset, { label: string; detail: string; height: number; fps: number; bitrate: number }> = {
+  smooth: { label: "Akıcı", detail: "720p · 60 fps", height: 720, fps: 60, bitrate: 3_500_000 },
+  balanced: { label: "Dengeli", detail: "1080p · 30 fps", height: 1080, fps: 30, bitrate: 4_500_000 },
+  sharp: { label: "Net", detail: "1080p · 60 fps", height: 1080, fps: 60, bitrate: 8_000_000 },
+};
+export interface ShareOptions {
+  surface: ShareSurface;
+  preset: SharePreset;
+}
 
 let active: { stop: () => void } | null = null;
 
@@ -14,12 +25,21 @@ export function isSharing() {
   return active !== null;
 }
 
-export async function startShare(): Promise<void> {
+export async function startShare(opts: ShareOptions = { surface: "monitor", preset: "balanced" }): Promise<void> {
   if (active) return;
   const app = useApp.getState();
+  const p = PRESETS[opts.preset];
+  const FPS = p.fps;
   let stream: MediaStream;
   try {
-    stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: FPS, max: 60 } }, audio: false });
+    // Hints make the system picker open on the right tab with only the relevant sources.
+    stream = await navigator.mediaDevices.getDisplayMedia({
+      video: { displaySurface: opts.surface, frameRate: { ideal: p.fps, max: p.fps }, height: { max: p.height }, width: { max: Math.round((p.height * 16) / 9) } },
+      audio: false,
+      selfBrowserSurface: "exclude",
+      surfaceSwitching: "include",
+      monitorTypeSurfaces: opts.surface === "monitor" ? "include" : "exclude",
+    } as DisplayMediaStreamOptions);
   } catch (e) {
     if ((e as DOMException)?.name !== "NotAllowedError") app.toast("error", `Ekran paylaşılamadı: ${errText(e)}`);
     return;
@@ -61,6 +81,7 @@ export async function startShare(): Promise<void> {
     else if (e.data.type === "error") onErr(e.data.msg ?? "Kodlama hatası");
   };
   requestKey = () => worker.postMessage({ type: "key" });
+  let congest = () => worker.postMessage({ type: "congestion" });
   let stopEncoder = () => {
     worker.postMessage({ type: "stop" });
     setTimeout(() => worker.terminate(), 500);
@@ -70,7 +91,7 @@ export async function startShare(): Promise<void> {
     // 1) transfer a clone of the track (keeps the original for the local preview)
     const clone = track.clone();
     try {
-      worker.postMessage({ type: "start", track: clone, framerate: FPS }, [clone as unknown as Transferable]);
+      worker.postMessage({ type: "start", track: clone, framerate: FPS, bitrate: p.bitrate }, [clone as unknown as Transferable]);
     } catch (e) {
       clone.stop(); // not transferable: do not leave a live capture behind
       throw e;
@@ -86,21 +107,24 @@ export async function startShare(): Promise<void> {
     const readable = new MSTP({ track }).readable;
     try {
       // 2) transfer the frame stream
-      worker.postMessage({ type: "start", readable, framerate: FPS }, [readable as unknown as Transferable]);
+      worker.postMessage({ type: "start", readable, framerate: FPS, bitrate: p.bitrate }, [readable as unknown as Transferable]);
     } catch {
       // 3) encode on the main thread
       worker.terminate();
-      const loop = runEncoder(readable, send, onErr, FPS);
+      const loop = runEncoder(readable, send, onErr, FPS, p.bitrate);
       requestKey = loop.requestKeyFrame;
+      congest = loop.congestion;
       stopEncoder = loop.stop;
     }
   }
   const offKey = on("stream_keyframe", () => requestKey());
+  const offCongest = on("stream_congestion", () => congest());
 
   const stop = () => {
     if (active !== handle) return;
     active = null;
     offKey();
+    offCongest();
     stopEncoder();
     stream.getTracks().forEach((t) => t.stop());
     useApp.setState({ localStream: null });

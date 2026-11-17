@@ -1,7 +1,7 @@
 // User-level actions shared by buttons, shortcuts and the command palette.
 import { call, errText, type Id } from "@/ipc";
 import { useApp } from "@/state/store";
-import { stopShare, toggleShare } from "@/media/share";
+import { isSharing, stopShare } from "@/media/share";
 
 const fail = (e: unknown) => useApp.getState().toast("error", errText(e));
 
@@ -39,7 +39,8 @@ export function shareScreen() {
     useApp.getState().toast("info", "Ekran paylaşmak için önce bir ses odasına katıl");
     return;
   }
-  void toggleShare();
+  if (isSharing()) stopShare();
+  else useApp.getState().openDialog("share");
 }
 
 export async function copy(text: string, what = "Kopyalandı") {

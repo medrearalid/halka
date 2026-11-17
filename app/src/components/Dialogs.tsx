@@ -11,6 +11,7 @@ import { InviteCreator } from "./InviteCreator";
 import { CreateSpaceForm, JoinForm, useSubmit } from "./forms";
 import { SpaceSettings } from "./SpaceSettings";
 import { AppSettings } from "./AppSettings";
+import { ShareSheet } from "./ShareSheet";
 
 export function Dialogs() {
   const dialog = useApp((s) => s.dialog);
@@ -23,7 +24,11 @@ export function Dialogs() {
         <DialogContent
           className={cn(
             "gap-0 overflow-hidden border-line-2 bg-paper-1 p-0",
-            big ? "h-[min(600px,calc(100vh-48px))] w-[min(820px,calc(100vw-32px))] max-w-none sm:max-w-none" : "w-[380px] sm:max-w-[380px]",
+            big
+              ? "h-[min(600px,calc(100vh-48px))] w-[min(820px,calc(100vw-32px))] max-w-none sm:max-w-none"
+              : kind === "share"
+                ? "w-[440px] sm:max-w-[440px]"
+                : "w-[380px] sm:max-w-[380px]",
           )}
           aria-describedby={undefined}
           // settings open on their content, not with a focus ring on the first tab
@@ -45,6 +50,8 @@ export function Dialogs() {
             <Small title="Davet et" desc="Kodu arkadaşına gönder. Kod tek başına yeterli; sunucu yok.">
               <InviteCreator />
             </Small>
+          ) : kind === "share" ? (
+            <ShareSheet onDone={close} />
           ) : kind === "create-channel" ? (
             <Small title="Kanal oluştur">
               <CreateChannelForm onDone={close} />

@@ -15,7 +15,7 @@ export interface Toast {
   text: string;
 }
 
-export type DialogKind = "app-settings" | "space-settings" | "invite" | "create-space" | "join-space" | "create-channel";
+export type DialogKind = "app-settings" | "space-settings" | "invite" | "create-space" | "join-space" | "create-channel" | "share";
 
 interface Persisted {
   space: Id | null;

@@ -166,6 +166,8 @@ pub enum Event {
     StreamEnded(Id),
     /// We're sharing and a watcher needs a key frame.
     StreamKeyframe,
+    /// We're sharing and a watcher's link can't keep up: lower the encoder bitrate.
+    StreamCongested,
 }
 
 /// Human-comparable safety code from a public key: 12 Crockford base32 chars, 3 groups.

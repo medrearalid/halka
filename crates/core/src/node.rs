@@ -83,6 +83,7 @@ pub(crate) struct Inner {
     /// Connections that should receive our voice datagrams.
     pub voice_targets: RwLock<Vec<Connection>>,
     pub last_keyframe: Mutex<std::time::Instant>,
+    pub last_congestion: Mutex<std::time::Instant>,
     /// Commands may run on a non-runtime thread (Tauri sync commands): spawn through this.
     pub rt: tokio::runtime::Handle,
 }
@@ -92,6 +93,13 @@ pub struct Node(pub(crate) Arc<Inner>);
 
 impl Inner {
     pub fn emit(&self, e: Event) {
+        if matches!(e, Event::StreamCongested) {
+            let mut last = self.last_congestion.lock();
+            if last.elapsed() < std::time::Duration::from_millis(1500) {
+                return;
+            }
+            *last = std::time::Instant::now();
+        }
         if matches!(e, Event::StreamKeyframe) {
             // watchers can ask for key frames; never let them turn the encoder into all-intra
             let mut last = self.last_keyframe.lock();
@@ -182,6 +190,7 @@ impl Node {
             }),
             voice_targets: RwLock::new(Vec::new()),
             rt: tokio::runtime::Handle::current(),
+            last_congestion: Mutex::new(std::time::Instant::now()),
             last_keyframe: Mutex::new(
                 std::time::Instant::now() - std::time::Duration::from_secs(5),
             ),
@@ -773,6 +782,7 @@ impl Node {
         }
         drop(st);
         if want_key {
+            self.0.emit(Event::StreamCongested);
             self.0.emit(Event::StreamKeyframe);
         }
         Ok(())

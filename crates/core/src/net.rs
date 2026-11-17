@@ -1228,6 +1228,8 @@ async fn gop_sender(
                 let Ok(mut s) = conn.open_uni().await else {
                     return;
                 };
+                // video yields to voice datagrams and control frames on a congested link
+                let _ = s.set_priority(-10);
                 let ok = async {
                     s.write_all(&[wire::UNI_STREAM]).await?;
                     if let Some(c) = &cfg {
@@ -1246,6 +1248,7 @@ async fn gop_sender(
                     if let Some(mut s) = cur.take() {
                         let _ = s.reset(0u32.into());
                     }
+                    i.emit(Event::StreamCongested);
                     i.emit(Event::StreamKeyframe);
                     continue;
                 }

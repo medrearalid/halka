@@ -16,7 +16,13 @@ console.log("in room");
 for (const X of [A, B]) await X.ev(`(()=>{const e=[...document.querySelectorAll("button")].find(e=>e.innerText.trim().startsWith("Sohbet")); e?.click(); return !!e})()`);
 await sleep(800);
 // A clicks the real share button
+await A.ev(`(()=>{window.__gap=0; let last=performance.now(); const tick=(t)=>{window.__gap=Math.max(window.__gap,t-last); last=t; requestAnimationFrame(tick)}; requestAnimationFrame(tick); return 1})()`);
+await sleep(500); await A.ev("window.__gap=0");
 const clicked = await A.ev(`(()=>{const b=[...document.querySelectorAll("button")].find(b=>(b.getAttribute("aria-label")||b.innerText).includes("Ekranı paylaş")); if(!b) return false; b.click(); return true})()`);
+await sleep(600);
+const sheet = await A.ev(`document.querySelector("[role=dialog]")?.innerText.slice(0,40) ?? "no sheet"`);
+console.log("share sheet:", JSON.stringify(sheet));
+await A.ev(`(()=>{[...document.querySelectorAll("[role=dialog] [role=radio]")].find(b=>b.innerText.includes("Dengeli"))?.click(); [...document.querySelectorAll("[role=dialog] button")].find(b=>b.innerText.includes("Paylaşmaya başla")).click(); return 1})()`);
 console.log("share clicked", clicked);
 for (let i = 0; i < 40; i++) { const s = await B.inv("snapshot"); if (s.spaces[0].channels.find(c => c.id === vc).streams.length) { console.log("B sees stream after", i * 250, "ms"); break; } await sleep(250); }
 await sleep(1000);
@@ -26,6 +32,7 @@ console.log("tile:", tile);
 await sleep(4000);
 const px = await B.ev(`(()=>{const c=[...document.querySelectorAll("canvas")].sort((a,b)=>b.width*b.height-a.width*a.height)[0]; if(!c) return "no canvas"; const x=document.createElement("canvas"); x.width=64;x.height=36; const g=x.getContext("2d"); g.drawImage(c,0,0,64,36); const d=g.getImageData(0,0,64,36).data; let lit=0; for(let i=0;i<d.length;i+=4) if(d[i]+d[i+1]+d[i+2]>40) lit++; return c.width+"x"+c.height+" lit="+lit+"/2304"})()`);
 console.log("B canvas:", px);
+console.log("A longest UI frame gap during share start:", Math.round(await A.ev("window.__gap")), "ms");
 const r = await B.send("Page.captureScreenshot", { format: "png" }); (await import("fs")).writeFileSync(out + "/b_watch.png", Buffer.from(r.result.data, "base64"));
 const r2 = await A.send("Page.captureScreenshot", { format: "png" }); (await import("fs")).writeFileSync(out + "/a_share.png", Buffer.from(r2.result.data, "base64"));
 process.exit(0);

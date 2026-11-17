@@ -255,4 +255,6 @@ export const STREAM_MAX_PACKET = 4 * 1024 * 1024;
 export interface ExtraEvents {
   /** Sharer side: please emit a key frame now. */
   stream_keyframe: {};
+  /** Sharer side: a watcher's link is saturated; lower the bitrate. */
+  stream_congestion: {};
 }
