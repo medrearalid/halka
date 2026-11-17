@@ -97,7 +97,11 @@ async fn space_lifecycle() {
     .await;
 
     // kick c: c loses the space, others drop it
-    a.op(s, OpBody::Kick { member: c.id() }).unwrap();
+    // Tauri runs sync commands on the main thread, outside the runtime: do the same here
+    let (a2, cid) = (a.clone(), c.id());
+    std::thread::spawn(move || a2.op(s, OpBody::Kick { member: cid }).unwrap())
+        .join()
+        .unwrap();
     until("c removed locally", || c.snapshot().spaces.is_empty()).await;
     until("b sees kick", || {
         !b.snapshot().spaces[0]

@@ -1002,7 +1002,7 @@ pub(crate) fn enforce_access(i: &Inner, st: &mut St) {
         if let Some(p) = st.peers.get(&m) {
             // give the writer a moment to flush the op that revoked access, so they learn of it
             let conn = p.conn.clone();
-            tokio::spawn(async move {
+            i.rt.spawn(async move {
                 tokio::time::sleep(Duration::from_secs(2)).await;
                 conn.close(3u32.into(), b"access revoked");
             });

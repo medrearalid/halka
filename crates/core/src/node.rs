@@ -83,6 +83,8 @@ pub(crate) struct Inner {
     /// Connections that should receive our voice datagrams.
     pub voice_targets: RwLock<Vec<Connection>>,
     pub last_keyframe: Mutex<std::time::Instant>,
+    /// Commands may run on a non-runtime thread (Tauri sync commands): spawn through this.
+    pub rt: tokio::runtime::Handle,
 }
 
 #[derive(Clone)]
@@ -179,6 +181,7 @@ impl Node {
                 mic_test: None,
             }),
             voice_targets: RwLock::new(Vec::new()),
+            rt: tokio::runtime::Handle::current(),
             last_keyframe: Mutex::new(
                 std::time::Instant::now() - std::time::Duration::from_secs(5),
             ),
