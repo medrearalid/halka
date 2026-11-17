@@ -1,0 +1,32 @@
+[package]
+name = "halka-core"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+iroh = "1.4"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "io-util"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+postcard = { version = "1", features = ["use-std"] }
+blake3 = "1"
+redb = "4"
+anyhow = "1"
+tracing = "0.1"
+bytes = "1"
+rand = "0.9"
+hex = "0.4"
+data-encoding = "2"
+parking_lot = "0.12"
+sonora = "0.3"
+opus = "0.4"
+cpal = "0.18"
+ringbuf = "0.4"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Security_Cryptography", "Win32_Foundation"] }
+
+[dev-dependencies]
+tempfile = "3"
+tracing-subscriber = "0.3"
