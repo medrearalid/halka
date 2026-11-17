@@ -86,6 +86,16 @@ await step("create role in settings", async () => {
   await A.key("Escape", 27);
 });
 
+await step("remove a permission from @herkes in the Roles tab", async () => {
+  await A.click(btn("Halka ayarları"));
+  await A.click(btn("Roller"));
+  await A.click(`[...document.querySelectorAll("[role=dialog] li button")].find(b=>b.innerText.trim()==="herkes")`);
+  await A.click(`document.querySelector("[role=dialog] [role=switch][aria-label='Ekran paylaş']")`);
+  await A.click(btn("Değişiklikleri kaydet"));
+  await B.until("B lost stream perm", async () => !(await B.inv("snapshot")).spaces[0].my_perms.includes("stream"));
+  await A.key("Escape", 27);
+});
+
 await step("assign role via member context menu", async () => {
   await A.click(`[...document.querySelectorAll("[aria-label=Üyeler] *")].find(e=>e.children.length===0&&e.innerText?.trim()==="Berk")`, "right");
   await A.hover(btn("Roller"));

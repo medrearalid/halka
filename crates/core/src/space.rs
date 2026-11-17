@@ -313,6 +313,18 @@ impl State {
                     }
                 }
             }
+            // dropping one of your own roles is always allowed and never grants anything
+            OpBody::AssignRole {
+                member,
+                role,
+                on: false,
+            } if member == a => {
+                let m = self
+                    .members
+                    .get_mut(a)
+                    .ok_or_else(|| anyhow::anyhow!("üye değilsin"))?;
+                ensure!(m.roles.remove(role), "bu role sahip değilsin");
+            }
             OpBody::AssignRole { member, role, on } => {
                 self.need(a, Perms::MANAGE_ROLES)?;
                 ensure!(*role != self.id, "herkes rolü atanamaz");
@@ -446,6 +458,15 @@ fn removal_target(op: &Op) -> Option<Id> {
 /// Their ops concurrent with `op` get voided ("revocation wins"), so a demoted admin can't fork
 /// the DAG from before the demotion and keep acting with old rights.
 fn revoked_by(st: &State, op: &Op) -> Vec<Id> {
+    // Only people the author outranks: never the author itself (an op must not void itself)
+    // and never someone above, or a removed mod could backdate an op that voids the owner.
+    let a = op.author;
+    let mut t = revoked_candidates(st, op);
+    t.retain(|m| *m != a && *m != st.owner && st.rank(&a) > st.rank(m));
+    t
+}
+
+fn revoked_candidates(st: &State, op: &Op) -> Vec<Id> {
     let holders = |role: &Id| -> Vec<Id> {
         st.members
             .iter()
@@ -607,6 +628,20 @@ impl SpaceLog {
         }
     }
 
+    /// Undo the insert of a just-authored leaf op that replay rejected, so nothing builds on it.
+    fn unlink(&mut self, id: &Id) {
+        let Some(e) = self.ops.remove(id) else { return };
+        self.heads.remove(id);
+        for p in &e.op.parents {
+            if let Some(c) = self.children.get_mut(p) {
+                c.retain(|x| x != id);
+            }
+            if self.children.get(p).is_none_or(|c| c.is_empty()) {
+                self.heads.insert(*p);
+            }
+        }
+    }
+
     pub fn missing_parents(&self) -> Vec<Id> {
         let mut v: Vec<Id> = self
             .pending
@@ -744,7 +779,11 @@ impl SpaceLog {
         let id = e.id;
         self.insert_entry(e)?;
         self.rebuild();
-        ensure!(!self.rejected.contains(&id), "işlem reddedildi");
+        if self.rejected.contains(&id) {
+            self.unlink(&id);
+            self.rebuild();
+            bail!("işlem reddedildi");
+        }
         Ok(signed)
     }
 }
@@ -993,6 +1032,112 @@ mod tests {
         let mut log2 = SpaceLog::new(log.genesis().clone()).unwrap();
         log2.insert_many(log.entries().map(|e| e.signed.clone()).collect::<Vec<_>>());
         assert_eq!(log2.state.name, "test");
+    }
+
+    #[test]
+    fn owner_can_narrow_everyone_and_self_unassign() {
+        let (o, b, mut log) = setup();
+        let everyone = log.id;
+        let narrowed = Perms(Perms::EVERYONE.0 & !Perms::STREAM.0);
+        log.author(
+            &o,
+            OpBody::UpdateRole {
+                role: everyone,
+                name: "herkes".into(),
+                color: 0,
+                perms: narrowed,
+                rank: 0,
+            },
+        )
+        .unwrap();
+        assert!(!log.state.perms(&idk(&b)).has(Perms::STREAM));
+        let r = log
+            .author(
+                &o,
+                OpBody::CreateRole {
+                    name: "mod".into(),
+                    color: 0,
+                    perms: Perms::MANAGE_ROLES,
+                    rank: 3,
+                },
+            )
+            .unwrap()
+            .id();
+        log.author(
+            &o,
+            OpBody::AssignRole {
+                member: idk(&b),
+                role: r,
+                on: true,
+            },
+        )
+        .unwrap();
+        // b drops its own role: must not void itself
+        log.author(
+            &b,
+            OpBody::AssignRole {
+                member: idk(&b),
+                role: r,
+                on: false,
+            },
+        )
+        .unwrap();
+        assert!(!log.state.members[&idk(&b)].roles.contains(&r));
+    }
+
+    #[test]
+    fn kicked_mod_cannot_void_the_kick() {
+        let (o, b, mut log) = setup();
+        let r = log
+            .author(
+                &o,
+                OpBody::CreateRole {
+                    name: "mod".into(),
+                    color: 0,
+                    perms: Perms::MANAGE_ROLES,
+                    rank: 3,
+                },
+            )
+            .unwrap()
+            .id();
+        log.author(
+            &o,
+            OpBody::AssignRole {
+                member: idk(&b),
+                role: r,
+                on: true,
+            },
+        )
+        .unwrap();
+        let before: Vec<Id> = log.heads.iter().copied().collect();
+        log.author(&o, OpBody::Kick { member: idk(&b) }).unwrap();
+        // backdated narrowing of @everyone (lower clock than the kick) aimed at everyone, owner included
+        let f = forge(
+            &log,
+            &b,
+            before,
+            OpBody::UpdateRole {
+                role: log.id,
+                name: "herkes".into(),
+                color: 0,
+                perms: Perms(0),
+                rank: 0,
+            },
+        );
+        log.insert_many([f]);
+        assert!(!log.state.is_member(&idk(&b)), "kick must stand");
+        assert!(log.state.perms(&idk(&o)).has(Perms::ALL));
+    }
+
+    #[test]
+    fn rejected_local_op_is_rolled_back() {
+        let (_o, b, mut log) = setup();
+        let n = log.len();
+        assert!(
+            log.author(&b, OpBody::RenameSpace { name: "x".into() })
+                .is_err()
+        );
+        assert_eq!(log.len(), n);
     }
 
     #[test]

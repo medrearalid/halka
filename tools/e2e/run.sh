@@ -10,6 +10,9 @@ t=$(date +%s)
 run 9301 "e2e-a-$t"; run 9302 "e2e-b-$t"
 node tools/e2e/flow.mjs "$out" || true
 taskkill //F //IM halka.exe >/dev/null 2>&1 || pkill halka || true
+run 9301 "e2e-e-$t"; run 9302 "e2e-f-$t"
+node tools/e2e/admin.mjs || true
+taskkill //F //IM halka.exe >/dev/null 2>&1 || pkill halka || true
 # --use-fake-ui-for-media-stream skips the screen picker for the sharer (test only)
 run 9301 "e2e-c-$t" "--use-fake-ui-for-media-stream"; run 9302 "e2e-d-$t"
 sleep 8; node tools/e2e/share.mjs "$out"

@@ -120,7 +120,9 @@ noktasından geriye tarihli işlem üretip geri sızmasını engeller. Bunun tes
   - rol oluşturma ve sağ tık menüsünden atama;
   - gizli kanalın rolü olmayana görünmemesi;
   - mesaj düzenleme ve silme;
+  - "herkes" rolünden yetki kaldırma;
   - ayar kaydı ve halkadan atma;
+  - aynı profil ikinci kez açılınca sessizce kapanma;
   - sesli oda ve ses paketlerinin karşıya ulaşması;
   - ekran paylaşımı: 1920×1080 kareler karşıda çözülüp çiziliyor, pencere simge durumundayken de yaklaşık 29 fps sürüyor.
 
@@ -129,4 +131,3 @@ noktasından geriye tarihli işlem üretip geri sızmasını engeller. Bunun tes
 - İnternet üzerinden farklı NAT'lar arkasında doğrudan bağlantı. Testler aynı makinede yapıldı; relay yolu da çalıştı.
 - n0 relay ve DNS sunucularının Türkiye'den erişilebilirliği.
 - **İlk açılışta Windows Güvenlik Duvarı izni.** Windows "ağlara erişime izin verilsin mi" diye sorar. İzin verilirse doğrudan bağlantı kurulabilir, verilmezse yalnızca relay kullanılır.
-- **Aynı profilin iki kez açılması.** İkinci açılış sessizce kapanır.
