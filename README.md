@@ -116,7 +116,7 @@ noktasından geriye tarihli işlem üretip geri sızmasını engeller. Bunun tes
   - Yeniden başlatma sonrası kalıcılık.
 - **Yankı engelleme:** hoparlörden mikrofona sızan konuşma benzeri sinyalin yaklaşık 50 dB'i siliniyor; AEC kapalıyken bu oran 3 dB.
 - **Gerçek mikrofon, ağ üzerinden:** AMD mikrofon dizisinin gerçek oda sesi yakalandı, kodlandı, gönderildi ve karşıda −78 dBFS olarak çözüldü. Kendi mikrofonunla tekrarlamak için: `HALKA_TEST_MIC="<aygıt adı>" cargo test --test e2e real_mic -- --ignored`.
-- **Kurulum:** sessiz kurulum, üzerine kurulum ve kaldırma çalışıyor. Etkileşimli sihirbaz da Hoş geldin → Kur → Bitir adımlarıyla dosyaları, Başlat menüsünü ve kaldırma kaydını oluşturdu.
+- **Kurulum:** sessiz kurulum, üzerine kurulum ve kaldırma çalışıyor. Etkileşimli sihirbaz da Hoş geldin → Kur → Bitir adımlarıyla dosyaları, Başlat menüsünü ve kaldırma kaydını oluşturdu; Bitir'e basınca 0 koduyla kapanıp Halka'yı başlattı.
 - **Gerçek ses, ağ üzerinden.** A'nın mikrofonu yerine 440 Hz test tonu verildi; B tonu doğrudan bağlantıda 0,77, yalnızca public relay üzerinden 0,72 seviyesinde duydu. İkinci ölçüm aynı zamanda relay'lere bu makineden (Türkiye) erişimi doğruluyor; gidiş-dönüş süresi yaklaşık 240 ms.
 - **Gerçek uygulamanın iki örneği arasında, gerçek fare ve klavye girdisiyle:**
   - isim, halka oluşturma, davet kodu ve katılma;
