@@ -406,6 +406,19 @@ impl SpaceLog {
         v
     }
 
+    /// The latest accepted kick/ban of `member` together with all its ancestors: enough for an
+    /// ex-member to verify their own removal, without revealing anything that happened after.
+    pub fn removal_proof(&self, member: &Id) -> Option<Vec<SignedOp>> {
+        let r = self
+            .order()
+            .into_iter()
+            .rev()
+            .find(|e| !self.rejected.contains(&e.id) && revocation_target(&e.op) == Some(*member))?;
+        let mut out: Vec<SignedOp> = self.reach(r.id, false).iter().map(|id| self.ops[id].signed.clone()).collect();
+        out.push(r.signed.clone());
+        Some(out)
+    }
+
     fn order(&self) -> Vec<&Entry> {
         let mut v: Vec<&Entry> = self.ops.values().collect();
         v.sort_by_key(|e| (e.op.clock, e.id));
