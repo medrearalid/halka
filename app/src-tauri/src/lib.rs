@@ -374,7 +374,10 @@ fn profile() -> Option<String> {
             return Some(p.to_string());
         }
     }
-    std::env::var("HALKA_PROFILE").ok()
+    // dev builds get their own identity and data, so they never block (or hijack) the installed app
+    std::env::var("HALKA_PROFILE")
+        .ok()
+        .or_else(|| cfg!(debug_assertions).then(|| "dev".into()))
 }
 
 /// Keep capture/encode alive while the window is hidden or occluded (sharing a game, etc.).
