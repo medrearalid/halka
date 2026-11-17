@@ -1,0 +1,102 @@
+import { useEffect } from "react";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { useApp } from "@/state/store";
+import { call } from "@/ipc";
+import { toggleDeafen, toggleMute } from "@/lib/actions";
+import { RingMark } from "@/components/common";
+import { Onboarding } from "@/components/Onboarding";
+import { Shell } from "@/components/Shell";
+import { Toasts } from "@/components/Toasts";
+import { Dialogs } from "@/components/Dialogs";
+import { CommandPalette } from "@/components/CommandPalette";
+
+function useGlobalKeys() {
+  useEffect(() => {
+    let pttHeld = false;
+    const typing = (t: EventTarget | null) =>
+      t instanceof HTMLElement && (t.isContentEditable || t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT");
+    const capturing = () => document.querySelector("[data-key-capture]") !== null;
+    const down = (e: KeyboardEvent) => {
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && !e.shiftKey && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        const s = useApp.getState();
+        s.setPalette(!s.palette);
+        return;
+      }
+      if (mod && e.shiftKey && e.code === "KeyM") {
+        e.preventDefault();
+        return toggleMute();
+      }
+      if (mod && e.shiftKey && e.code === "KeyD") {
+        e.preventDefault();
+        return toggleDeafen();
+      }
+      const snap = useApp.getState().snap;
+      if (snap?.settings.push_to_talk && snap.voice && e.code === snap.settings.ptt_key && !e.repeat && !typing(e.target) && !capturing()) {
+        if (!pttHeld) {
+          pttHeld = true;
+          void call("set_ptt", { down: true });
+        }
+      }
+    };
+    const up = (e: KeyboardEvent) => {
+      const snap = useApp.getState().snap;
+      if (pttHeld && e.code === snap?.settings.ptt_key) {
+        pttHeld = false;
+        void call("set_ptt", { down: false });
+      }
+    };
+    // never leave the mic open when focus leaves the window
+    const blur = () => {
+      if (pttHeld) {
+        pttHeld = false;
+        void call("set_ptt", { down: false });
+      }
+    };
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    window.addEventListener("blur", blur);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+      window.removeEventListener("blur", blur);
+    };
+  }, []);
+}
+
+export function App() {
+  useGlobalKeys();
+  const ready = useApp((s) => s.snap !== null);
+  const bootError = useApp((s) => s.bootError);
+  const needsOnboarding = useApp((s) => !!s.snap && (!s.snap.me.name.trim() || s.snap.me.name === "Anonim" || s.snap.spaces.length === 0));
+
+  return (
+    <TooltipProvider delayDuration={600} skipDelayDuration={200}>
+      {bootError ? (
+        <div className="grid h-full place-items-center">
+          <div className="enter flex max-w-sm flex-col items-center gap-2 text-center">
+            <RingMark size={28} className="text-danger" />
+            <div className="font-medium">Çekirdek başlatılamadı</div>
+            <p className="text-xs text-ink-3" data-selectable>
+              {bootError}
+            </p>
+          </div>
+        </div>
+      ) : !ready ? (
+        <div className="grid h-full place-items-center">
+          <RingMark size={28} className="animate-[pulse-live_1.6s_ease-in-out_infinite] text-ink-3" />
+        </div>
+      ) : needsOnboarding ? (
+        <Onboarding />
+      ) : (
+        <>
+          <Shell />
+          <CommandPalette />
+        </>
+      )}
+      <Dialogs />
+      <Toasts />
+    </TooltipProvider>
+  );
+}

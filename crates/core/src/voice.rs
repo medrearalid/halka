@@ -37,6 +37,8 @@ pub struct VoiceOptions {
     pub noise_suppression: bool,
     pub echo_cancellation: bool,
     pub push_to_talk: bool,
+    /// KeyboardEvent.code (or "Mouse4"/"Mouse5"); polled globally so PTT works while gaming.
+    pub ptt_key: String,
     pub vad_threshold: f32,
 }
 
@@ -63,6 +65,7 @@ struct Shared {
     deafened: AtomicBool,
     ptt_down: AtomicBool,
     push_to_talk: AtomicBool,
+    ptt_vk: AtomicU32,
     vad_threshold: AtomicU32,
     ns: AtomicBool,
     aec: AtomicBool,
@@ -122,6 +125,40 @@ pub fn devices() -> (Vec<String>, Vec<String>) {
     (inputs, outputs)
 }
 
+/// Windows virtual-key code for a KeyboardEvent.code; 0 = unsupported (UI focus-only PTT).
+fn virtual_key(code: &str) -> u32 {
+    let b = code.as_bytes();
+    match code {
+        _ if code.len() == 4 && code.starts_with("Key") && b[3].is_ascii_uppercase() => b[3] as u32,
+        _ if code.len() == 6 && code.starts_with("Digit") && b[5].is_ascii_digit() => b[5] as u32,
+        _ if code.starts_with('F') && code[1..].parse::<u32>().is_ok_and(|n| (1..=24).contains(&n)) => 0x6F + code[1..].parse::<u32>().unwrap_or(0),
+        "Mouse4" => 0x05,
+        "Mouse5" => 0x06,
+        "Space" => 0x20,
+        "Tab" => 0x09,
+        "CapsLock" => 0x14,
+        "ShiftLeft" => 0xA0,
+        "ShiftRight" => 0xA1,
+        "ControlLeft" => 0xA2,
+        "ControlRight" => 0xA3,
+        "AltLeft" => 0xA4,
+        "AltRight" => 0xA5,
+        "Backquote" => 0xC0,
+        _ => 0,
+    }
+}
+
+#[cfg(windows)]
+fn key_down(vk: u32) -> bool {
+    // SAFETY: plain Win32 query of one key's state; no hooks, no input interception.
+    vk != 0 && unsafe { windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(vk as i32) } < 0
+}
+
+#[cfg(not(windows))]
+fn key_down(_: u32) -> bool {
+    false // shortcut: global PTT is Windows-only; other OSes rely on focused-window PTT
+}
+
 /// Streaming linear resampler (fine for speech; keeps CPU near zero).
 struct Resampler {
     step: f64,
@@ -178,6 +215,7 @@ impl Voice {
             deafened: AtomicBool::new(false),
             ptt_down: AtomicBool::new(false),
             push_to_talk: AtomicBool::new(opts.push_to_talk),
+            ptt_vk: AtomicU32::new(virtual_key(&opts.ptt_key)),
             vad_threshold: AtomicU32::new(opts.vad_threshold.to_bits()),
             ns: AtomicBool::new(opts.noise_suppression),
             aec: AtomicBool::new(opts.echo_cancellation),
@@ -317,6 +355,7 @@ impl Voice {
     }
     pub fn apply(&self, o: &VoiceOptions) {
         self.sh.push_to_talk.store(o.push_to_talk, Relaxed);
+        self.sh.ptt_vk.store(virtual_key(&o.ptt_key), Relaxed);
         self.sh
             .vad_threshold
             .store(o.vad_threshold.to_bits(), Relaxed);
@@ -529,7 +568,7 @@ fn process(
         let open = if sh.muted.load(Relaxed) || sh.deafened.load(Relaxed) {
             false
         } else if sh.push_to_talk.load(Relaxed) {
-            sh.ptt_down.load(Relaxed)
+            sh.ptt_down.load(Relaxed) || key_down(sh.ptt_vk.load(Relaxed))
         } else {
             if level >= f32::from_bits(sh.vad_threshold.load(Relaxed)) {
                 hang = HANGOVER_FRAMES;
@@ -570,6 +609,7 @@ mod tests {
             deafened: AtomicBool::new(false),
             ptt_down: AtomicBool::new(false),
             push_to_talk: AtomicBool::new(false),
+            ptt_vk: AtomicU32::new(0),
             vad_threshold: AtomicU32::new(0),
             ns: AtomicBool::new(true),
             aec: AtomicBool::new(true),
@@ -608,6 +648,15 @@ mod tests {
             .fold((0.0, 0.0), |(l, r), c| (l + c[0].abs(), r + c[1].abs()));
         assert!(r > 10.0 && l < r * 0.01, "panned right: l={l} r={r}");
         assert!(out.iter().all(|s| s.abs() <= 1.0));
+    }
+
+    #[test]
+    fn ptt_key_map() {
+        assert_eq!(virtual_key("KeyV"), 0x56);
+        assert_eq!(virtual_key("Digit1"), 0x31);
+        assert_eq!(virtual_key("F13"), 0x7C);
+        assert_eq!(virtual_key("Mouse4"), 0x05);
+        assert_eq!(virtual_key("Keyv"), 0);
     }
 
     #[test]

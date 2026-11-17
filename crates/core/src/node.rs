@@ -789,6 +789,7 @@ pub(crate) fn voice_opts(s: &Settings) -> VoiceOptions {
         noise_suppression: s.noise_suppression,
         echo_cancellation: s.echo_cancellation,
         push_to_talk: s.push_to_talk,
+        ptt_key: s.ptt_key.clone(),
         vad_threshold: s.vad_threshold,
     }
 }

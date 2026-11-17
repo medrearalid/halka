@@ -120,7 +120,7 @@ impl Default for Settings {
             echo_cancellation: true,
             push_to_talk: false,
             ptt_key: "KeyV".into(),
-            vad_threshold: 0.12,
+            vad_threshold: 0.3,
             input: None,
             output: None,
         }

@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ui",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "--cwd", "app", "dev"],
+      "port": 1420
+    },
+    {
+      "name": "ui-preview",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "--cwd", "app", "preview"],
+      "port": 1421
+    }
+  ]
+}
