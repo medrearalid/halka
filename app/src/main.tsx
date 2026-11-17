@@ -4,6 +4,9 @@ import "./index.css";
 import { App } from "./App";
 import { boot, useApp } from "./state/store";
 
+// Suppress the WebView menu while letting application context menus handle the event.
+document.addEventListener("contextmenu", (event) => event.preventDefault());
+
 void boot();
 // dev-only handle for poking the store from devtools
 if (import.meta.env.DEV) (window as unknown as { __halka: typeof useApp }).__halka = useApp;
