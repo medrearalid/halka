@@ -35,11 +35,17 @@ struct Rate {
 
 impl Rate {
     fn new(per_sec: f64, burst: f64) -> Rate {
-        Rate { tokens: burst, last: Instant::now(), per_sec, burst }
+        Rate {
+            tokens: burst,
+            last: Instant::now(),
+            per_sec,
+            burst,
+        }
     }
     fn allow(&mut self, cost: f64) -> bool {
         let now = Instant::now();
-        self.tokens = (self.tokens + now.duration_since(self.last).as_secs_f64() * self.per_sec).min(self.burst);
+        self.tokens = (self.tokens + now.duration_since(self.last).as_secs_f64() * self.per_sec)
+            .min(self.burst);
         self.last = now;
         if self.tokens >= cost {
             self.tokens -= cost;
@@ -87,13 +93,22 @@ pub(crate) fn spawn_background(i: &Arc<Inner>) {
                 let st = d.st.lock();
                 let mut t = BTreeSet::new();
                 for log in st.spaces.values() {
-                    t.extend(log.state.members.keys().filter(|m| **m != d.me && !st.peers.contains_key(m)).copied());
+                    t.extend(
+                        log.state
+                            .members
+                            .keys()
+                            .filter(|m| **m != d.me && !st.peers.contains_key(m))
+                            .copied(),
+                    );
                 }
                 t.into_iter().collect()
             };
             let now = Instant::now();
             for m in targets {
-                let (next, wait) = backoff.get(&m).copied().unwrap_or((now, Duration::from_secs(3)));
+                let (next, wait) = backoff
+                    .get(&m)
+                    .copied()
+                    .unwrap_or((now, Duration::from_secs(3)));
                 if now < next {
                     continue;
                 }
@@ -114,7 +129,11 @@ pub(crate) fn spawn_background(i: &Arc<Inner>) {
         loop {
             tick.tick().await;
             n += 1;
-            let levels = p.st.lock().voice.as_ref().and_then(|v| v.engine.as_ref().map(|e| e.levels(p.me)));
+            let levels =
+                p.st.lock()
+                    .voice
+                    .as_ref()
+                    .and_then(|v| v.engine.as_ref().map(|e| e.levels(p.me)));
             if let Some(l) = levels {
                 p.emit(Event::Levels(l));
             }
@@ -142,14 +161,25 @@ pub(crate) fn remote_addr(c: &Connection) -> iroh::EndpointAddr {
 
 pub(crate) fn path_info(c: &Connection) -> (ConnKind, Option<u32>) {
     match c.paths().iter().find(|p| p.is_selected()) {
-        Some(p) => (if p.is_relay() { ConnKind::Relay } else { ConnKind::Direct }, Some(p.rtt().as_millis() as u32)),
+        Some(p) => (
+            if p.is_relay() {
+                ConnKind::Relay
+            } else {
+                ConnKind::Direct
+            },
+            Some(p.rtt().as_millis() as u32),
+        ),
         None => (ConnKind::Relay, None),
     }
 }
 
 /// Spaces where `m` is a member in our view.
 fn shared_spaces(st: &St, m: &Id) -> Vec<Id> {
-    st.spaces.iter().filter(|(_, l)| l.state.is_member(m)).map(|(s, _)| *s).collect()
+    st.spaces
+        .iter()
+        .filter(|(_, l)| l.state.is_member(m))
+        .map(|(s, _)| *s)
+        .collect()
 }
 
 pub(crate) async fn dial(i: &Arc<Inner>, m: Id, join: Option<wire::JoinReq>) -> Result<()> {
@@ -160,13 +190,29 @@ pub(crate) async fn dial(i: &Arc<Inner>, m: Id, join: Option<wire::JoinReq>) -> 
         }
         shared_spaces(&st, &m)
     };
-    let conn = tokio::time::timeout(Duration::from_secs(15), i.ep.connect(m.key()?, wire::ALPN)).await.context("timeout")??;
+    let conn = tokio::time::timeout(Duration::from_secs(15), i.ep.connect(m.key()?, wire::ALPN))
+        .await
+        .context("timeout")??;
     let (mut send, mut recv) = conn.open_bi().await?;
-    wire::write_frame(&mut send, &Frame::Hello { spaces, join: join.clone() }).await?;
+    wire::write_frame(
+        &mut send,
+        &Frame::Hello {
+            spaces,
+            join: join.clone(),
+        },
+    )
+    .await?;
     let spaces = loop {
-        match tokio::time::timeout(Duration::from_secs(10), wire::read_frame(&mut recv, MAX_FRAME)).await?? {
+        match tokio::time::timeout(
+            Duration::from_secs(10),
+            wire::read_frame(&mut recv, MAX_FRAME),
+        )
+        .await??
+        {
             Some(Frame::Welcome { spaces }) => break spaces,
-            Some(Frame::Ops { space, ops }) if ops.len() <= MAX_OPS_PER_FRAME => apply_removal_proof(i, space, ops),
+            Some(Frame::Ops { space, ops }) if ops.len() <= MAX_OPS_PER_FRAME => {
+                apply_removal_proof(i, space, ops)
+            }
             _ => bail!("no welcome"),
         }
     };
@@ -175,21 +221,46 @@ pub(crate) async fn dial(i: &Arc<Inner>, m: Id, join: Option<wire::JoinReq>) -> 
         ensure!(spaces == [j.space], "join refused");
     }
     let i2 = i.clone();
-    tokio::spawn(async move { run_peer(i2, conn, send, recv, spaces.into_iter().collect(), None, true).await });
+    tokio::spawn(async move {
+        run_peer(
+            i2,
+            conn,
+            send,
+            recv,
+            spaces.into_iter().collect(),
+            None,
+            true,
+        )
+        .await
+    });
     Ok(())
 }
 
-async fn accept(i: Arc<Inner>, inc: iroh::endpoint::Incoming, permit: tokio::sync::OwnedSemaphorePermit) -> Result<()> {
+async fn accept(
+    i: Arc<Inner>,
+    inc: iroh::endpoint::Incoming,
+    permit: tokio::sync::OwnedSemaphorePermit,
+) -> Result<()> {
     let conn = tokio::time::timeout(Duration::from_secs(10), inc).await??;
     let remote: Id = conn.remote_id().into();
     ensure!(remote != i.me, "self");
-    let (mut send, mut recv) = tokio::time::timeout(Duration::from_secs(5), conn.accept_bi()).await??;
-    let hello = tokio::time::timeout(Duration::from_secs(5), wire::read_frame(&mut recv, MAX_HELLO)).await??;
-    let Some(Frame::Hello { spaces, join }) = hello else { bail!("expected hello") };
+    let (mut send, mut recv) =
+        tokio::time::timeout(Duration::from_secs(5), conn.accept_bi()).await??;
+    let hello = tokio::time::timeout(
+        Duration::from_secs(5),
+        wire::read_frame(&mut recv, MAX_HELLO),
+    )
+    .await??;
+    let Some(Frame::Hello { spaces, join }) = hello else {
+        bail!("expected hello")
+    };
     let (allowed, joining) = {
         let st = i.st.lock();
-        let mut allowed: Vec<Id> =
-            spaces.iter().filter(|s| st.spaces.get(s).is_some_and(|l| l.state.is_member(&remote))).copied().collect();
+        let mut allowed: Vec<Id> = spaces
+            .iter()
+            .filter(|s| st.spaces.get(s).is_some_and(|l| l.state.is_member(&remote)))
+            .copied()
+            .collect();
         allowed.truncate(256);
         let mut joining = None;
         if let Some(j) = join {
@@ -203,11 +274,23 @@ async fn accept(i: Arc<Inner>, inc: iroh::endpoint::Incoming, permit: tokio::syn
         // An ex-member who missed their removal gets the proof, so they stop retrying.
         let proof = {
             let st = i.st.lock();
-            spaces.iter().find_map(|s| st.spaces.get(s).and_then(|l| l.removal_proof(&remote)).map(|ops| (*s, ops)))
+            spaces.iter().find_map(|s| {
+                st.spaces
+                    .get(s)
+                    .and_then(|l| l.removal_proof(&remote))
+                    .map(|ops| (*s, ops))
+            })
         };
         if let Some((space, ops)) = proof {
             for chunk in ops.chunks(MAX_OPS_PER_FRAME) {
-                wire::write_frame(&mut send, &Frame::Ops { space, ops: chunk.to_vec() }).await?;
+                wire::write_frame(
+                    &mut send,
+                    &Frame::Ops {
+                        space,
+                        ops: chunk.to_vec(),
+                    },
+                )
+                .await?;
             }
             let _ = send.finish();
             let _ = tokio::time::timeout(Duration::from_secs(3), conn.closed()).await;
@@ -215,21 +298,42 @@ async fn accept(i: Arc<Inner>, inc: iroh::endpoint::Incoming, permit: tokio::syn
         conn.close(1u32.into(), b"not a member");
         bail!("{remote:?} shares no space with us");
     }
-    wire::write_frame(&mut send, &Frame::Welcome { spaces: allowed.clone() }).await?;
+    wire::write_frame(
+        &mut send,
+        &Frame::Welcome {
+            spaces: allowed.clone(),
+        },
+    )
+    .await?;
     drop(permit);
-    run_peer(i, conn, send, recv, allowed.into_iter().collect(), joining, false).await;
+    run_peer(
+        i,
+        conn,
+        send,
+        recv,
+        allowed.into_iter().collect(),
+        joining,
+        false,
+    )
+    .await;
     Ok(())
 }
 
 /// Ops a remote sent instead of a welcome: only ever useful if they prove we were removed.
 fn apply_removal_proof(i: &Inner, space: Id, ops: Vec<SignedOp>) {
     let mut st = i.st.lock();
-    let Some(log) = st.spaces.get_mut(&space) else { return };
+    let Some(log) = st.spaces.get_mut(&space) else {
+        return;
+    };
     let added = log.insert_many(ops);
     if added.is_empty() {
         return;
     }
-    let new: Vec<SignedOp> = added.iter().filter_map(|id| log.get(id)).map(|e| e.signed.clone()).collect();
+    let new: Vec<SignedOp> = added
+        .iter()
+        .filter_map(|id| log.get(id))
+        .map(|e| e.signed.clone())
+        .collect();
     let _ = i.store.put_ops(&space, &new);
     if !log.state.is_member(&i.me) {
         let name = log.state.name.clone();
@@ -250,7 +354,15 @@ fn check_join(st: &St, joiner: &Id, j: &wire::JoinReq) -> Result<()> {
     let inv = s.invites.get(&j.invite).context("unknown invite")?;
     ensure!(inv.expires.is_none_or(|x| id::now_ms() <= x), "expired");
     ensure!(inv.max_uses.is_none_or(|m| inv.uses < m), "used up");
-    ensure!(id::verify(&j.invite, op::DOMAIN_JOIN, &op::join_proof_msg(&j.space, joiner), &j.proof), "bad proof");
+    ensure!(
+        id::verify(
+            &j.invite,
+            op::DOMAIN_JOIN,
+            &op::join_proof_msg(&j.space, joiner),
+            &j.proof
+        ),
+        "bad proof"
+    );
     Ok(())
 }
 
@@ -277,8 +389,20 @@ async fn run_peer(
             }
             old.conn.close(0u32.into(), b"replaced");
         }
-        st.peers.insert(remote, Peer { conn: conn.clone(), tx, spaces, joining, dialer });
-        let _ = i.store.put_peer_addr(&remote, &postcard::to_stdvec(&remote_addr(&conn)).unwrap_or_default());
+        st.peers.insert(
+            remote,
+            Peer {
+                conn: conn.clone(),
+                tx,
+                spaces,
+                joining,
+                dialer,
+            },
+        );
+        let _ = i.store.put_peer_addr(
+            &remote,
+            &postcard::to_stdvec(&remote_addr(&conn)).unwrap_or_default(),
+        );
         if let Some(sp) = joining {
             // a joiner needs the whole log first
             let ops: Vec<SignedOp> = st.spaces[&sp].entries().map(|e| e.signed.clone()).collect();
@@ -305,7 +429,11 @@ async fn run_peer(
     uni.abort();
 
     let mut st = i.st.lock();
-    if st.peers.get(&remote).is_some_and(|p| p.conn.stable_id() == conn.stable_id()) {
+    if st
+        .peers
+        .get(&remote)
+        .is_some_and(|p| p.conn.stable_id() == conn.stable_id())
+    {
         st.peers.remove(&remote);
         st.presence.retain(|(_, m), _| *m != remote);
         st.watchers.remove(&remote);
@@ -329,7 +457,12 @@ async fn write_loop(mut send: SendStream, mut rx: mpsc::Receiver<Frame>) {
     let _ = send.finish();
 }
 
-async fn read_loop(i: &Arc<Inner>, conn: &Connection, mut recv: RecvStream, remote: Id) -> Result<()> {
+async fn read_loop(
+    i: &Arc<Inner>,
+    conn: &Connection,
+    mut recv: RecvStream,
+    remote: Id,
+) -> Result<()> {
     let mut frames = Rate::new(400.0, 2000.0);
     let mut bytes = Rate::new(4.0 * 1024.0 * 1024.0, 16.0 * 1024.0 * 1024.0);
     // each ops frame triggers a replay; bound how hard one peer can make us work
@@ -342,11 +475,18 @@ async fn read_loop(i: &Arc<Inner>, conn: &Connection, mut recv: RecvStream, remo
         };
         let Some(f) = f else { return Ok(()) };
         let size = postcard::experimental::serialized_size(&f).unwrap_or(0) as f64;
-        ensure!(frames.allow(1.0) && bytes.allow(size), "rate limit exceeded");
+        ensure!(
+            frames.allow(1.0) && bytes.allow(size),
+            "rate limit exceeded"
+        );
         if matches!(f, Frame::Ops { .. }) {
             ensure!(op_frames.allow(1.0), "op rate limit exceeded");
         }
-        let joining = i.st.lock().peers.get(&remote).is_some_and(|p| p.joining.is_some());
+        let joining =
+            i.st.lock()
+                .peers
+                .get(&remote)
+                .is_some_and(|p| p.joining.is_some());
         if joining {
             ensure!(Instant::now() < join_deadline, "join took too long");
             if !matches!(f, Frame::Ops { .. }) {
@@ -358,7 +498,9 @@ async fn read_loop(i: &Arc<Inner>, conn: &Connection, mut recv: RecvStream, remo
 }
 
 fn peer_has(st: &St, remote: &Id, space: &Id) -> bool {
-    st.peers.get(remote).is_some_and(|p| p.spaces.contains(space))
+    st.peers
+        .get(remote)
+        .is_some_and(|p| p.spaces.contains(space))
 }
 
 fn send_to(st: &St, to: Id, f: Frame) {
@@ -374,39 +516,64 @@ fn send_ops(st: &St, to: Id, space: Id, mut ops: Vec<SignedOp>) {
     // parents first so the receiver can insert without parking
     ops.sort_by_key(|o| o.verify().map(|e| e.op.clock).unwrap_or(u64::MAX));
     for chunk in ops.chunks(MAX_OPS_PER_FRAME) {
-        send_to(st, to, Frame::Ops { space, ops: chunk.to_vec() });
+        send_to(
+            st,
+            to,
+            Frame::Ops {
+                space,
+                ops: chunk.to_vec(),
+            },
+        );
     }
 }
 
 /// Send to every connected member of `space` except `skip`.
 pub(crate) fn broadcast(st: &St, space: Id, skip: Option<Id>, f: impl Fn() -> Frame) {
-    let targets: Vec<Id> = st.peers.iter().filter(|(m, p)| Some(**m) != skip && p.spaces.contains(&space) && p.joining.is_none()).map(|(m, _)| *m).collect();
+    let targets: Vec<Id> = st
+        .peers
+        .iter()
+        .filter(|(m, p)| Some(**m) != skip && p.spaces.contains(&space) && p.joining.is_none())
+        .map(|(m, _)| *m)
+        .collect();
     for m in targets {
         send_to(st, m, f());
     }
 }
 
 fn op_items(st: &St, space: &Id) -> Vec<(u64, Id)> {
-    st.spaces.get(space).map(|l| l.entries().map(|e| (e.op.clock, e.id)).collect()).unwrap_or_default()
+    st.spaces
+        .get(space)
+        .map(|l| l.entries().map(|e| (e.op.clock, e.id)).collect())
+        .unwrap_or_default()
 }
 
 fn msg_items(i: &Inner, space: &Id, channel: &Id, from: u64, to: u64) -> Vec<(u64, Id)> {
-    i.store.sync_items(space, channel, from, to).unwrap_or_default()
+    i.store
+        .sync_items(space, channel, from, to)
+        .unwrap_or_default()
 }
 
 /// Text channels both we and `remote` may read.
 fn shared_channels(i: &Inner, st: &St, space: &Id, remote: &Id) -> Vec<Id> {
-    let Some(l) = st.spaces.get(space) else { return vec![] };
+    let Some(l) = st.spaces.get(space) else {
+        return vec![];
+    };
     l.state
         .channels
         .iter()
-        .filter(|(c, ch)| ch.kind == op::ChannelKind::Text && l.state.can_view(&i.me, c) && l.state.can_view(remote, c))
+        .filter(|(c, ch)| {
+            ch.kind == op::ChannelKind::Text
+                && l.state.can_view(&i.me, c)
+                && l.state.can_view(remote, c)
+        })
         .map(|(c, _)| *c)
         .collect()
 }
 
 pub(crate) fn send_summaries(i: &Inner, st: &mut St, remote: Id) {
-    let Some(p) = st.peers.get(&remote) else { return };
+    let Some(p) = st.peers.get(&remote) else {
+        return;
+    };
     if p.joining.is_some() {
         return;
     }
@@ -416,7 +583,15 @@ pub(crate) fn send_summaries(i: &Inner, st: &mut St, remote: Id) {
         send_to(st, remote, Frame::OpSummary { space: s, buckets });
         for c in shared_channels(i, st, &s, &remote) {
             let buckets = wire::summarize(msg_items(i, &s, &c, 0, u64::MAX), MSG_BUCKET);
-            send_to(st, remote, Frame::MsgSummary { space: s, channel: c, buckets });
+            send_to(
+                st,
+                remote,
+                Frame::MsgSummary {
+                    space: s,
+                    channel: c,
+                    buckets,
+                },
+            );
         }
     }
 }
@@ -425,12 +600,24 @@ fn announce_presence(st: &St, remote: Id) {
     if let Some(v) = &st.voice
         && peer_has(st, &remote, &v.space)
     {
-        send_to(st, remote, Frame::Presence { space: v.space, voice: Some(my_presence(v)) });
+        send_to(
+            st,
+            remote,
+            Frame::Presence {
+                space: v.space,
+                voice: Some(my_presence(v)),
+            },
+        );
     }
 }
 
 fn my_presence(v: &crate::node::MyVoice) -> wire::Presence {
-    wire::Presence { channel: v.channel, muted: v.muted, deafened: v.deafened, streaming: v.streaming }
+    wire::Presence {
+        channel: v.channel,
+        muted: v.muted,
+        deafened: v.deafened,
+        streaming: v.streaming,
+    }
 }
 
 fn handle(i: &Arc<Inner>, remote: Id, f: Frame) -> Result<()> {
@@ -444,8 +631,20 @@ fn handle(i: &Arc<Inner>, remote: Id, f: Frame) -> Result<()> {
             let ours = op_items(&st, &space);
             let mine = wire::summarize(ours.iter().copied(), OP_BUCKET);
             for b in wire::diff(&mine, &buckets) {
-                let ids = ours.iter().filter(|(k, _)| k / OP_BUCKET == b).map(|(_, id)| *id).collect();
-                send_to(&st, remote, Frame::OpIds { space, bucket: b, ids });
+                let ids = ours
+                    .iter()
+                    .filter(|(k, _)| k / OP_BUCKET == b)
+                    .map(|(_, id)| *id)
+                    .collect();
+                send_to(
+                    &st,
+                    remote,
+                    Frame::OpIds {
+                        space,
+                        bucket: b,
+                        ids,
+                    },
+                );
             }
         }
         Frame::OpIds { space, bucket, ids } => {
@@ -455,8 +654,11 @@ fn handle(i: &Arc<Inner>, remote: Id, f: Frame) -> Result<()> {
             }
             let theirs: BTreeSet<Id> = ids.into_iter().collect();
             let log = st.spaces.get(&space).context("space")?;
-            let missing: Vec<SignedOp> =
-                log.entries().filter(|e| e.op.clock / OP_BUCKET == bucket && !theirs.contains(&e.id)).map(|e| e.signed.clone()).collect();
+            let missing: Vec<SignedOp> = log
+                .entries()
+                .filter(|e| e.op.clock / OP_BUCKET == bucket && !theirs.contains(&e.id))
+                .map(|e| e.signed.clone())
+                .collect();
             send_ops(&st, remote, space, missing);
         }
         Frame::WantOps { space, ids } => {
@@ -464,7 +666,12 @@ fn handle(i: &Arc<Inner>, remote: Id, f: Frame) -> Result<()> {
                 return Ok(());
             }
             let log = st.spaces.get(&space).context("space")?;
-            let ops: Vec<SignedOp> = ids.iter().take(4096).filter_map(|id| log.get(id)).map(|e| e.signed.clone()).collect();
+            let ops: Vec<SignedOp> = ids
+                .iter()
+                .take(4096)
+                .filter_map(|id| log.get(id))
+                .map(|e| e.signed.clone())
+                .collect();
             send_ops(&st, remote, space, ops);
         }
         Frame::Ops { space, ops } => {
@@ -474,7 +681,11 @@ fn handle(i: &Arc<Inner>, remote: Id, f: Frame) -> Result<()> {
             ensure!(ops.len() <= MAX_OPS_PER_FRAME, "too many ops");
             ingest_ops(i, &mut st, remote, space, ops)?;
         }
-        Frame::MsgSummary { space, channel, buckets } => {
+        Frame::MsgSummary {
+            space,
+            channel,
+            buckets,
+        } => {
             if !peer_has(&st, &remote, &space) {
                 return Ok(());
             }
@@ -484,11 +695,29 @@ fn handle(i: &Arc<Inner>, remote: Id, f: Frame) -> Result<()> {
             let ours = msg_items(i, &space, &channel, 0, u64::MAX);
             let mine = wire::summarize(ours.iter().copied(), MSG_BUCKET);
             for b in wire::diff(&mine, &buckets) {
-                let ids = ours.iter().filter(|(k, _)| k / MSG_BUCKET == b).map(|(_, id)| *id).collect();
-                send_to(&st, remote, Frame::MsgIds { space, channel, bucket: b, ids });
+                let ids = ours
+                    .iter()
+                    .filter(|(k, _)| k / MSG_BUCKET == b)
+                    .map(|(_, id)| *id)
+                    .collect();
+                send_to(
+                    &st,
+                    remote,
+                    Frame::MsgIds {
+                        space,
+                        channel,
+                        bucket: b,
+                        ids,
+                    },
+                );
             }
         }
-        Frame::MsgIds { space, channel, bucket, ids } => {
+        Frame::MsgIds {
+            space,
+            channel,
+            bucket,
+            ids,
+        } => {
             ensure!(ids.len() <= 100_000, "bad msg ids");
             if !peer_has(&st, &remote, &space) {
                 return Ok(());
@@ -499,10 +728,22 @@ fn handle(i: &Arc<Inner>, remote: Id, f: Frame) -> Result<()> {
             let theirs: BTreeSet<Id> = ids.into_iter().collect();
             let from = bucket.saturating_mul(MSG_BUCKET);
             let mine: Vec<Id> =
-                msg_items(i, &space, &channel, from, from.saturating_add(MSG_BUCKET)).into_iter().map(|(_, id)| id).filter(|id| !theirs.contains(id)).collect();
+                msg_items(i, &space, &channel, from, from.saturating_add(MSG_BUCKET))
+                    .into_iter()
+                    .map(|(_, id)| id)
+                    .filter(|id| !theirs.contains(id))
+                    .collect();
             let msgs = i.store.get_msgs(&mine)?;
             for chunk in msgs.chunks(MAX_MSGS_PER_FRAME) {
-                send_to(&st, remote, Frame::Msgs { space, msgs: chunk.to_vec(), live: false });
+                send_to(
+                    &st,
+                    remote,
+                    Frame::Msgs {
+                        space,
+                        msgs: chunk.to_vec(),
+                        live: false,
+                    },
+                );
             }
         }
         Frame::Msgs { space, msgs, live } => {
@@ -523,7 +764,11 @@ fn handle(i: &Arc<Inner>, remote: Id, f: Frame) -> Result<()> {
             match voice {
                 Some(p) => {
                     let ok = st.spaces.get(&space).is_some_and(|l| {
-                        l.state.channels.get(&p.channel).is_some_and(|c| c.kind == op::ChannelKind::Voice) && l.state.can_view(&remote, &p.channel)
+                        l.state
+                            .channels
+                            .get(&p.channel)
+                            .is_some_and(|c| c.kind == op::ChannelKind::Voice)
+                            && l.state.can_view(&remote, &p.channel)
                     });
                     if !ok {
                         return Ok(());
@@ -541,7 +786,10 @@ fn handle(i: &Arc<Inner>, remote: Id, f: Frame) -> Result<()> {
                 }
             }
             // a sharer that stopped (or left) ends our view
-            let still = st.presence.get(&(space, remote)).is_some_and(|p| p.streaming);
+            let still = st
+                .presence
+                .get(&(space, remote))
+                .is_some_and(|p| p.streaming);
             if !still && st.watching.remove(&remote).is_some() {
                 i.emit(Event::StreamEnded(remote));
             }
@@ -554,8 +802,15 @@ fn handle(i: &Arc<Inner>, remote: Id, f: Frame) -> Result<()> {
                 st.watchers.remove(&remote);
                 return Ok(());
             }
-            let v = st.voice.as_ref().filter(|v| v.streaming).context("not streaming")?;
-            let same_room = st.presence.get(&(v.space, remote)).is_some_and(|p| p.channel == v.channel);
+            let v = st
+                .voice
+                .as_ref()
+                .filter(|v| v.streaming)
+                .context("not streaming")?;
+            let same_room = st
+                .presence
+                .get(&(v.space, remote))
+                .is_some_and(|p| p.channel == v.channel);
             ensure!(same_room, "watcher not in our room");
             ensure!(st.watchers.len() < 16, "too many watchers");
             let conn = st.peers.get(&remote).context("peer")?.conn.clone();
@@ -576,11 +831,21 @@ fn handle(i: &Arc<Inner>, remote: Id, f: Frame) -> Result<()> {
     Ok(())
 }
 
-fn ingest_ops(i: &Arc<Inner>, st: &mut St, remote: Id, space: Id, ops: Vec<SignedOp>) -> Result<()> {
+fn ingest_ops(
+    i: &Arc<Inner>,
+    st: &mut St,
+    remote: Id,
+    space: Id,
+    ops: Vec<SignedOp>,
+) -> Result<()> {
     // Joiner side: the acceptor streams us the whole log for a space we don't have yet.
     if !st.spaces.contains_key(&space) {
         ensure!(st.joins.contains_key(&space), "unsolicited space");
-        let g = ops.iter().find(|o| o.id() == space).cloned().context("genesis missing")?;
+        let g = ops
+            .iter()
+            .find(|o| o.id() == space)
+            .cloned()
+            .context("genesis missing")?;
         let mut log = crate::space::SpaceLog::new(g)?;
         log.insert_many(ops.iter().cloned());
         st.spaces.insert(space, log);
@@ -590,24 +855,45 @@ fn ingest_ops(i: &Arc<Inner>, st: &mut St, remote: Id, space: Id, ops: Vec<Signe
     }
     let joiner = st.peers.get(&remote).and_then(|p| p.joining);
     if let Some(js) = joiner {
-        ensure!(js == space && ops.len() <= 4, "joining peer sent unexpected ops");
-        ensure!(ops.iter().all(|o| o.verify().is_ok_and(|e| e.op.author == remote)), "joining peer may only send its own ops");
+        ensure!(
+            js == space && ops.len() <= 4,
+            "joining peer sent unexpected ops"
+        );
+        ensure!(
+            ops.iter()
+                .all(|o| o.verify().is_ok_and(|e| e.op.author == remote)),
+            "joining peer may only send its own ops"
+        );
     }
     let log = st.spaces.get_mut(&space).expect("checked");
     let was_member = log.state.is_member(&remote);
     let added = log.insert_many(ops);
     let missing = log.missing_parents();
     if !missing.is_empty() {
-        send_to(st, remote, Frame::WantOps { space, ids: missing });
+        send_to(
+            st,
+            remote,
+            Frame::WantOps {
+                space,
+                ids: missing,
+            },
+        );
     }
     if added.is_empty() {
         maybe_finish_join(i, st, space, remote);
         return Ok(());
     }
     let log = &st.spaces[&space];
-    let new: Vec<SignedOp> = added.iter().filter_map(|id| log.get(id)).map(|e| e.signed.clone()).collect();
+    let new: Vec<SignedOp> = added
+        .iter()
+        .filter_map(|id| log.get(id))
+        .map(|e| e.signed.clone())
+        .collect();
     i.store.put_ops(&space, &new)?;
-    broadcast(st, space, Some(remote), || Frame::Ops { space, ops: new.clone() });
+    broadcast(st, space, Some(remote), || Frame::Ops {
+        space,
+        ops: new.clone(),
+    });
     // joiner became a member: promote the connection to a full one
     if joiner.is_some() && !was_member && st.spaces[&space].state.is_member(&remote) {
         if let Some(p) = st.peers.get_mut(&remote) {
@@ -635,18 +921,45 @@ fn ingest_ops(i: &Arc<Inner>, st: &mut St, remote: Id, space: Id, ops: Vec<Signe
 
 /// Joiner side: once we hold the log, author our Join op and push it.
 fn maybe_finish_join(i: &Arc<Inner>, st: &mut St, space: Id, remote: Id) {
-    let Some(j) = st.joins.get(&space) else { return };
-    if j.done.is_none() || st.spaces.get(&space).is_none_or(|l| l.state.is_member(&i.me)) {
+    let Some(j) = st.joins.get(&space) else {
+        return;
+    };
+    if j.done.is_none()
+        || st
+            .spaces
+            .get(&space)
+            .is_none_or(|l| l.state.is_member(&i.me))
+    {
         return;
     }
     let invite = j.invite.clone();
-    let name = if st.name.is_empty() { "Yeni üye".to_string() } else { st.name.clone() };
+    let name = if st.name.is_empty() {
+        "Yeni üye".to_string()
+    } else {
+        st.name.clone()
+    };
     let proof = id::sign(&invite, op::DOMAIN_JOIN, &op::join_proof_msg(&space, &i.me));
     let log = st.spaces.get_mut(&space).expect("checked");
     // may fail until the chunk carrying our invite arrives; we retry on every ops frame
-    let Ok(s) = log.author(&i.key, OpBody::Join { invite: invite.public().into(), proof, name }) else { return };
+    let Ok(s) = log.author(
+        &i.key,
+        OpBody::Join {
+            invite: invite.public().into(),
+            proof,
+            name,
+        },
+    ) else {
+        return;
+    };
     let _ = i.store.put_ops(&space, std::slice::from_ref(&s));
-    send_to(st, remote, Frame::Ops { space, ops: vec![s] });
+    send_to(
+        st,
+        remote,
+        Frame::Ops {
+            space,
+            ops: vec![s],
+        },
+    );
     if let Some(d) = st.joins.get_mut(&space).and_then(|j| j.done.take()) {
         let _ = d.send(Ok(()));
     }
@@ -664,7 +977,11 @@ pub(crate) fn enforce_access(i: &Inner, st: &mut St) {
         if p.joining.is_some() {
             continue;
         }
-        p.spaces.retain(|s| st.spaces.get(s).is_some_and(|l| l.state.is_member(m) && l.state.is_member(&me)));
+        p.spaces.retain(|s| {
+            st.spaces
+                .get(s)
+                .is_some_and(|l| l.state.is_member(m) && l.state.is_member(&me))
+        });
         if p.spaces.is_empty() {
             close.push(*m);
         }
@@ -680,18 +997,31 @@ pub(crate) fn enforce_access(i: &Inner, st: &mut St) {
         }
     }
     let spaces = &st.spaces;
-    st.presence.retain(|(s, m), _| spaces.get(s).is_some_and(|l| l.state.is_member(m)));
+    st.presence
+        .retain(|(s, m), _| spaces.get(s).is_some_and(|l| l.state.is_member(m)));
 }
 
-pub(crate) fn ingest_msg(i: &Inner, st: &mut St, from: Option<Id>, s: SignedMsg, live: bool) -> Result<()> {
+pub(crate) fn ingest_msg(
+    i: &Inner,
+    st: &mut St,
+    from: Option<Id>,
+    s: SignedMsg,
+    live: bool,
+) -> Result<()> {
     let m = s.verify()?;
     let log = st.spaces.get(&m.space).context("unknown space")?;
     let state = &log.state;
     msg::authorized(state, &m, id::now_ms())?;
     if let Some(f) = from {
         // live pushes must come from current members; ex-members' history only via reconciliation
-        ensure!(!live || state.is_member(&m.author), "ex-member live message");
-        ensure!(state.can_view(&f, &m.channel), "sender can't see this channel");
+        ensure!(
+            !live || state.is_member(&m.author),
+            "ex-member live message"
+        );
+        ensure!(
+            state.can_view(&f, &m.channel),
+            "sender can't see this channel"
+        );
     }
     match &m.body {
         MsgBody::Text { .. } => {}
@@ -699,8 +1029,13 @@ pub(crate) fn ingest_msg(i: &Inner, st: &mut St, from: Option<Id>, s: SignedMsg,
             let t = i.store.msg_view(target)?.context("unknown target")?;
             ensure!(t.msg.channel == m.channel, "target in another channel");
             match m.body {
-                MsgBody::Edit { .. } => ensure!(t.msg.author == m.author, "only the author may edit"),
-                _ => ensure!(msg::can_delete(state, &m.author, &t.msg.author, &m.channel), "not allowed to delete"),
+                MsgBody::Edit { .. } => {
+                    ensure!(t.msg.author == m.author, "only the author may edit")
+                }
+                _ => ensure!(
+                    msg::can_delete(state, &m.author, &t.msg.author, &m.channel),
+                    "not allowed to delete"
+                ),
             }
         }
     }
@@ -717,12 +1052,25 @@ pub(crate) fn ingest_msg(i: &Inner, st: &mut St, from: Option<Id>, s: SignedMsg,
     let targets: Vec<Id> = st
         .peers
         .iter()
-        .filter(|(pm, p)| Some(**pm) != from && p.spaces.contains(&space) && p.joining.is_none() && state.can_view(pm, &channel))
+        .filter(|(pm, p)| {
+            Some(**pm) != from
+                && p.spaces.contains(&space)
+                && p.joining.is_none()
+                && state.can_view(pm, &channel)
+        })
         .map(|(pm, _)| *pm)
         .collect();
     if live {
         for t in targets {
-            send_to(st, t, Frame::Msgs { space, msgs: vec![s.clone()], live: true });
+            send_to(
+                st,
+                t,
+                Frame::Msgs {
+                    space,
+                    msgs: vec![s.clone()],
+                    live: true,
+                },
+            );
         }
     }
     if let Some(v) = i.store.msg_view(&target)? {
@@ -738,7 +1086,10 @@ pub(crate) fn ingest_msg(i: &Inner, st: &mut St, from: Option<Id>, s: SignedMsg,
 pub(crate) fn voice_changed(i: &Inner, st: &mut St) {
     if let Some(v) = &st.voice {
         let (space, p) = (v.space, my_presence(v));
-        broadcast(st, space, None, || Frame::Presence { space, voice: Some(p.clone()) });
+        broadcast(st, space, None, || Frame::Presence {
+            space,
+            voice: Some(p.clone()),
+        });
     }
     voice_changed_quiet(i, st);
 }
@@ -774,7 +1125,10 @@ fn voice_changed_quiet(i: &Inner, st: &mut St) {
         .filter(|m| log.state.can_view(m, &channel))
         .filter_map(|m| st.peers.get(m).map(|p| p.conn.clone()))
         .collect();
-    let speakers: HashMap<Id, f32> = pans.into_iter().filter(|(m, _)| log.state.can_in(m, &channel, Perms::SPEAK)).collect();
+    let speakers: HashMap<Id, f32> = pans
+        .into_iter()
+        .filter(|(m, _)| log.state.can_in(m, &channel, Perms::SPEAK))
+        .collect();
     if let Some(e) = &v.engine {
         e.set_layout(speakers);
     }
@@ -789,7 +1143,10 @@ async fn datagram_loop(i: Arc<Inner>, conn: Connection, remote: Id) {
         }
         let st = i.st.lock();
         let Some(v) = &st.voice else { continue };
-        let in_room = st.presence.get(&(v.space, remote)).is_some_and(|p| p.channel == v.channel);
+        let in_room = st
+            .presence
+            .get(&(v.space, remote))
+            .is_some_and(|p| p.channel == v.channel);
         if in_room && let Some(e) = &v.engine {
             e.receive(remote, &dg); // engine drops peers not in its speaker layout
         }
@@ -811,7 +1168,12 @@ async fn read_gop(i: &Inner, r: &mut RecvStream, remote: Id) -> Result<()> {
     let mut tag = [0u8; 1];
     r.read_exact(&mut tag).await?;
     ensure!(tag[0] == wire::UNI_STREAM, "unknown uni stream");
-    let (sink, gen_ctr) = i.st.lock().watching.get(&remote).cloned().context("not watching")?;
+    let (sink, gen_ctr) =
+        i.st.lock()
+            .watching
+            .get(&remote)
+            .cloned()
+            .context("not watching")?;
     let my_gen = gen_ctr.fetch_add(1, Ordering::SeqCst) + 1;
     loop {
         let mut len = [0u8; 4];
@@ -830,7 +1192,12 @@ async fn read_gop(i: &Inner, r: &mut RecvStream, remote: Id) -> Result<()> {
 }
 
 /// Sharer side, one task per watcher: each key frame opens a fresh uni stream.
-async fn gop_sender(conn: Connection, mut rx: mpsc::Receiver<(Instant, Arc<Vec<u8>>)>, mut cfg: Option<Arc<Vec<u8>>>, i: Arc<Inner>) {
+async fn gop_sender(
+    conn: Connection,
+    mut rx: mpsc::Receiver<(Instant, Arc<Vec<u8>>)>,
+    mut cfg: Option<Arc<Vec<u8>>>,
+    i: Arc<Inner>,
+) {
     let mut cur: Option<SendStream> = None;
     async fn put(s: &mut SendStream, p: &[u8]) -> Result<()> {
         s.write_all(&(p.len() as u32).to_le_bytes()).await?;
@@ -844,7 +1211,9 @@ async fn gop_sender(conn: Connection, mut rx: mpsc::Receiver<(Instant, Arc<Vec<u
                 if let Some(mut s) = cur.take() {
                     let _ = s.finish();
                 }
-                let Ok(mut s) = conn.open_uni().await else { return };
+                let Ok(mut s) = conn.open_uni().await else {
+                    return;
+                };
                 let ok = async {
                     s.write_all(&[wire::UNI_STREAM]).await?;
                     if let Some(c) = &cfg {

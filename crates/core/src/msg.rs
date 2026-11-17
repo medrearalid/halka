@@ -39,7 +39,10 @@ pub struct SignedMsg {
 impl SignedMsg {
     pub fn sign(key: &iroh::SecretKey, m: &Msg) -> Result<SignedMsg> {
         let bytes = postcard::to_stdvec(m)?;
-        Ok(SignedMsg { sig: id::sign(key, DOMAIN_MSG, &bytes), bytes })
+        Ok(SignedMsg {
+            sig: id::sign(key, DOMAIN_MSG, &bytes),
+            bytes,
+        })
     }
 
     pub fn id(&self) -> Id {
@@ -50,8 +53,14 @@ impl SignedMsg {
     pub fn verify(&self) -> Result<Msg> {
         ensure!(self.bytes.len() <= MAX_MSG_BYTES, "message too large");
         let m: Msg = postcard::from_bytes(&self.bytes)?;
-        ensure!(postcard::to_stdvec(&m)? == self.bytes, "non-canonical message");
-        ensure!(id::verify(&m.author, DOMAIN_MSG, &self.bytes, &self.sig), "bad message signature");
+        ensure!(
+            postcard::to_stdvec(&m)? == self.bytes,
+            "non-canonical message"
+        );
+        ensure!(
+            id::verify(&m.author, DOMAIN_MSG, &self.bytes, &self.sig),
+            "bad message signature"
+        );
         match &m.body {
             MsgBody::Text { text, .. } | MsgBody::Edit { text, .. } => check_text(text)?,
             MsgBody::Delete { .. } => {}
@@ -62,7 +71,10 @@ impl SignedMsg {
 
 pub fn check_text(t: &str) -> Result<()> {
     ensure!(!t.trim().is_empty(), "boş mesaj");
-    ensure!(t.chars().count() <= MAX_TEXT, "mesaj en fazla {MAX_TEXT} karakter olabilir");
+    ensure!(
+        t.chars().count() <= MAX_TEXT,
+        "mesaj en fazla {MAX_TEXT} karakter olabilir"
+    );
     Ok(())
 }
 
@@ -72,14 +84,23 @@ pub fn check_text(t: &str) -> Result<()> {
 pub fn authorized(st: &State, m: &Msg, now: u64) -> Result<()> {
     ensure!(m.space == st.id, "wrong space");
     ensure!(m.ts <= now + MAX_CLOCK_SKEW_MS, "message from the future");
-    let ch = st.channels.get(&m.channel).ok_or_else(|| anyhow::anyhow!("kanal yok"))?;
-    ensure!(ch.kind == crate::op::ChannelKind::Text, "metin kanalı değil");
+    let ch = st
+        .channels
+        .get(&m.channel)
+        .ok_or_else(|| anyhow::anyhow!("kanal yok"))?;
+    ensure!(
+        ch.kind == crate::op::ChannelKind::Text,
+        "metin kanalı değil"
+    );
     if st.is_member(&m.author) {
         let need = match m.body {
             MsgBody::Text { .. } | MsgBody::Edit { .. } => Perms::SEND,
             MsgBody::Delete { .. } => Perms(0),
         };
-        ensure!(st.can_view(&m.author, &m.channel) && st.perms(&m.author).has(need), "bu kanalda yazma yetkin yok");
+        ensure!(
+            st.can_view(&m.author, &m.channel) && st.perms(&m.author).has(need),
+            "bu kanalda yazma yetkin yok"
+        );
         return Ok(());
     }
     ensure!(st.former.contains_key(&m.author), "üye değil");

@@ -65,7 +65,9 @@ pub struct State {
 
 impl State {
     fn genesis(e: &Entry) -> Result<State> {
-        let OpBody::Genesis { name, .. } = &e.op.body else { bail!("not a genesis op") };
+        let OpBody::Genesis { name, .. } = &e.op.body else {
+            bail!("not a genesis op")
+        };
         let mut s = State {
             id: e.id,
             owner: e.op.author,
@@ -77,9 +79,23 @@ impl State {
             bans: BTreeSet::new(),
             former: BTreeMap::new(),
         };
-        s.members.insert(e.op.author, Member { name: "Kurucu".into(), roles: BTreeSet::new() });
+        s.members.insert(
+            e.op.author,
+            Member {
+                name: "Kurucu".into(),
+                roles: BTreeSet::new(),
+            },
+        );
         // Built-in @everyone role shares the space id, like Discord.
-        s.roles.insert(e.id, Role { name: "herkes".into(), color: 0x8a8f98, perms: Perms::EVERYONE, rank: 0 });
+        s.roles.insert(
+            e.id,
+            Role {
+                name: "herkes".into(),
+                color: 0x8a8f98,
+                perms: Perms::EVERYONE,
+                rank: 0,
+            },
+        );
         Ok(s)
     }
 
@@ -93,18 +109,35 @@ impl State {
         }
         self.members
             .get(m)
-            .map(|mm| mm.roles.iter().filter_map(|r| self.roles.get(r)).map(|r| r.rank as u64).max().unwrap_or(0))
+            .map(|mm| {
+                mm.roles
+                    .iter()
+                    .filter_map(|r| self.roles.get(r))
+                    .map(|r| r.rank as u64)
+                    .max()
+                    .unwrap_or(0)
+            })
             .unwrap_or(0)
     }
 
     /// Space-level effective permissions.
     pub fn perms(&self, m: &Id) -> Perms {
-        let Some(mm) = self.members.get(m) else { return Perms(0) };
+        let Some(mm) = self.members.get(m) else {
+            return Perms(0);
+        };
         if *m == self.owner {
             return Perms::ALL;
         }
-        let base = self.roles.get(&self.id).map(|r| r.perms).unwrap_or_default();
-        mm.roles.iter().filter_map(|r| self.roles.get(r)).fold(base, |p, r| p.union(r.perms)).effective()
+        let base = self
+            .roles
+            .get(&self.id)
+            .map(|r| r.perms)
+            .unwrap_or_default();
+        mm.roles
+            .iter()
+            .filter_map(|r| self.roles.get(r))
+            .fold(base, |p, r| p.union(r.perms))
+            .effective()
     }
 
     pub fn can(&self, m: &Id, p: Perms) -> bool {
@@ -112,11 +145,17 @@ impl State {
     }
 
     pub fn can_view(&self, m: &Id, channel: &Id) -> bool {
-        let Some(c) = self.channels.get(channel) else { return false };
-        let Some(mm) = self.members.get(m) else { return false };
+        let Some(c) = self.channels.get(channel) else {
+            return false;
+        };
+        let Some(mm) = self.members.get(m) else {
+            return false;
+        };
         match &c.private_roles {
             None => true,
-            Some(allowed) => self.perms(m).has(Perms::ADMIN) || mm.roles.iter().any(|r| allowed.contains(r)),
+            Some(allowed) => {
+                self.perms(m).has(Perms::ADMIN) || mm.roles.iter().any(|r| allowed.contains(r))
+            }
         }
     }
 
@@ -132,12 +171,20 @@ impl State {
 
     fn outranks(&self, a: &Id, target: &Id) -> Result<()> {
         ensure!(*target != self.owner, "kurucuya bu yapılamaz");
-        ensure!(self.rank(a) > self.rank(target), "bu kişi senden yüksek ya da eşit rütbede");
+        ensure!(
+            self.rank(a) > self.rank(target),
+            "bu kişi senden yüksek ya da eşit rütbede"
+        );
         Ok(())
     }
 
     fn known_roles(&self, roles: &Option<Vec<Id>>) -> Option<BTreeSet<Id>> {
-        roles.as_ref().map(|r| r.iter().filter(|r| self.roles.contains_key(r)).copied().collect())
+        roles.as_ref().map(|r| {
+            r.iter()
+                .filter(|r| self.roles.contains_key(r))
+                .copied()
+                .collect()
+        })
     }
 
     fn remove_member(&mut self, m: &Id) {
@@ -156,15 +203,34 @@ impl State {
                 self.need(a, Perms::MANAGE_SPACE)?;
                 self.name = name.clone();
             }
-            OpBody::CreateChannel { name, kind, private_roles } => {
+            OpBody::CreateChannel {
+                name,
+                kind,
+                private_roles,
+            } => {
                 self.need(a, Perms::MANAGE_CHANNELS)?;
                 let pr = self.known_roles(private_roles);
-                self.channels.insert(e.id, Channel { name: name.clone(), kind: *kind, private_roles: pr, order: (e.op.clock, e.id) });
+                self.channels.insert(
+                    e.id,
+                    Channel {
+                        name: name.clone(),
+                        kind: *kind,
+                        private_roles: pr,
+                        order: (e.op.clock, e.id),
+                    },
+                );
             }
-            OpBody::UpdateChannel { channel, name, private_roles } => {
+            OpBody::UpdateChannel {
+                channel,
+                name,
+                private_roles,
+            } => {
                 self.need(a, Perms::MANAGE_CHANNELS)?;
                 let pr = self.known_roles(private_roles);
-                let c = self.channels.get_mut(channel).ok_or_else(|| anyhow::anyhow!("kanal yok"))?;
+                let c = self
+                    .channels
+                    .get_mut(channel)
+                    .ok_or_else(|| anyhow::anyhow!("kanal yok"))?;
                 c.name = name.clone();
                 c.private_roles = pr;
             }
@@ -172,28 +238,70 @@ impl State {
                 self.need(a, Perms::MANAGE_CHANNELS)?;
                 ensure!(self.channels.remove(channel).is_some(), "kanal yok");
             }
-            OpBody::CreateRole { name, color, perms, rank } => {
+            OpBody::CreateRole {
+                name,
+                color,
+                perms,
+                rank,
+            } => {
                 self.need(a, Perms::MANAGE_ROLES)?;
-                ensure!(*rank >= 1 && (*rank as u64) < self.rank(a), "rütbe kendi rütbenden düşük ve en az 1 olmalı");
-                ensure!(perms.subset_of(self.perms(a)), "sahip olmadığın yetkiyi veremezsin");
-                self.roles.insert(e.id, Role { name: name.clone(), color: color & 0xffffff, perms: *perms, rank: *rank });
+                ensure!(
+                    *rank >= 1 && (*rank as u64) < self.rank(a),
+                    "rütbe kendi rütbenden düşük ve en az 1 olmalı"
+                );
+                ensure!(
+                    perms.subset_of(self.perms(a)),
+                    "sahip olmadığın yetkiyi veremezsin"
+                );
+                self.roles.insert(
+                    e.id,
+                    Role {
+                        name: name.clone(),
+                        color: color & 0xffffff,
+                        perms: *perms,
+                        rank: *rank,
+                    },
+                );
             }
-            OpBody::UpdateRole { role, name, color, perms, rank } => {
+            OpBody::UpdateRole {
+                role,
+                name,
+                color,
+                perms,
+                rank,
+            } => {
                 self.need(a, Perms::MANAGE_ROLES)?;
                 let my_rank = self.rank(a);
                 let my_perms = self.perms(a);
                 let everyone = *role == self.id;
-                let r = self.roles.get_mut(role).ok_or_else(|| anyhow::anyhow!("rol yok"))?;
+                let r = self
+                    .roles
+                    .get_mut(role)
+                    .ok_or_else(|| anyhow::anyhow!("rol yok"))?;
                 ensure!((r.rank as u64) < my_rank, "bu rol senden yüksek");
-                ensure!(perms.subset_of(my_perms), "sahip olmadığın yetkiyi veremezsin");
+                ensure!(
+                    perms.subset_of(my_perms),
+                    "sahip olmadığın yetkiyi veremezsin"
+                );
                 let rank = if everyone { 0 } else { *rank };
-                ensure!(everyone || (rank >= 1 && (rank as u64) < my_rank), "geçersiz rütbe");
-                *r = Role { name: name.clone(), color: color & 0xffffff, perms: *perms, rank };
+                ensure!(
+                    everyone || (rank >= 1 && (rank as u64) < my_rank),
+                    "geçersiz rütbe"
+                );
+                *r = Role {
+                    name: name.clone(),
+                    color: color & 0xffffff,
+                    perms: *perms,
+                    rank,
+                };
             }
             OpBody::DeleteRole { role } => {
                 self.need(a, Perms::MANAGE_ROLES)?;
                 ensure!(*role != self.id, "herkes rolü silinemez");
-                let r = self.roles.get(role).ok_or_else(|| anyhow::anyhow!("rol yok"))?;
+                let r = self
+                    .roles
+                    .get(role)
+                    .ok_or_else(|| anyhow::anyhow!("rol yok"))?;
                 ensure!((r.rank as u64) < self.rank(a), "bu rol senden yüksek");
                 self.roles.remove(role);
                 for m in self.members.values_mut() {
@@ -208,39 +316,94 @@ impl State {
             OpBody::AssignRole { member, role, on } => {
                 self.need(a, Perms::MANAGE_ROLES)?;
                 ensure!(*role != self.id, "herkes rolü atanamaz");
-                let r = self.roles.get(role).ok_or_else(|| anyhow::anyhow!("rol yok"))?;
+                let r = self
+                    .roles
+                    .get(role)
+                    .ok_or_else(|| anyhow::anyhow!("rol yok"))?;
                 ensure!((r.rank as u64) < self.rank(a), "bu rol senden yüksek");
                 ensure!(self.is_member(member), "üye yok");
                 if member != a {
                     self.outranks(a, member)?;
                 }
                 let m = self.members.get_mut(member).expect("checked");
-                if *on { m.roles.insert(*role) } else { m.roles.remove(role) };
+                if *on {
+                    m.roles.insert(*role)
+                } else {
+                    m.roles.remove(role)
+                };
             }
-            OpBody::CreateInvite { key, expires, max_uses } => {
+            OpBody::CreateInvite {
+                key,
+                expires,
+                max_uses,
+            } => {
                 self.need(a, Perms::INVITE)?;
                 ensure!(!self.invites.contains_key(key), "davet zaten var");
-                self.invites.insert(*key, Invite { created_by: *a, expires: *expires, max_uses: *max_uses, uses: 0 });
+                self.invites.insert(
+                    *key,
+                    Invite {
+                        created_by: *a,
+                        expires: *expires,
+                        max_uses: *max_uses,
+                        uses: 0,
+                    },
+                );
             }
             OpBody::RevokeInvite { key } => {
                 ensure!(self.is_member(a), "üye değilsin");
-                let i = self.invites.get(key).ok_or_else(|| anyhow::anyhow!("davet yok"))?;
-                ensure!(i.created_by == *a || self.perms(a).has(Perms::MANAGE_SPACE), "bu daveti iptal edemezsin");
+                let i = self
+                    .invites
+                    .get(key)
+                    .ok_or_else(|| anyhow::anyhow!("davet yok"))?;
+                ensure!(
+                    i.created_by == *a || self.perms(a).has(Perms::MANAGE_SPACE),
+                    "bu daveti iptal edemezsin"
+                );
                 self.invites.remove(key);
             }
-            OpBody::Join { invite, proof, name } => {
+            OpBody::Join {
+                invite,
+                proof,
+                name,
+            } => {
                 ensure!(!self.is_member(a), "zaten üyesin");
                 ensure!(!self.bans.contains(a), "bu halkadan yasaklandın");
-                let i = self.invites.get_mut(invite).ok_or_else(|| anyhow::anyhow!("davet geçersiz ya da iptal edilmiş"))?;
-                ensure!(i.max_uses.is_none_or(|m| i.uses < m), "davetin kullanım hakkı doldu");
-                ensure!(i.expires.is_none_or(|x| e.op.ts <= x), "davetin süresi dolmuş");
-                ensure!(id::verify(invite, op::DOMAIN_JOIN, &op::join_proof_msg(&self.id, a), proof), "davet kanıtı geçersiz");
+                let i = self
+                    .invites
+                    .get_mut(invite)
+                    .ok_or_else(|| anyhow::anyhow!("davet geçersiz ya da iptal edilmiş"))?;
+                ensure!(
+                    i.max_uses.is_none_or(|m| i.uses < m),
+                    "davetin kullanım hakkı doldu"
+                );
+                ensure!(
+                    i.expires.is_none_or(|x| e.op.ts <= x),
+                    "davetin süresi dolmuş"
+                );
+                ensure!(
+                    id::verify(
+                        invite,
+                        op::DOMAIN_JOIN,
+                        &op::join_proof_msg(&self.id, a),
+                        proof
+                    ),
+                    "davet kanıtı geçersiz"
+                );
                 i.uses += 1;
                 self.former.remove(a);
-                self.members.insert(*a, Member { name: name.clone(), roles: BTreeSet::new() });
+                self.members.insert(
+                    *a,
+                    Member {
+                        name: name.clone(),
+                        roles: BTreeSet::new(),
+                    },
+                );
             }
             OpBody::SetName { name } => {
-                let m = self.members.get_mut(a).ok_or_else(|| anyhow::anyhow!("üye değilsin"))?;
+                let m = self
+                    .members
+                    .get_mut(a)
+                    .ok_or_else(|| anyhow::anyhow!("üye değilsin"))?;
                 m.name = name.clone();
             }
             OpBody::Kick { member } => {
@@ -367,7 +530,12 @@ impl SpaceLog {
             }
             return Ok(Added::Pending);
         }
-        let max = e.op.parents.iter().map(|p| self.ops[p].op.clock).max().unwrap_or(0);
+        let max =
+            e.op.parents
+                .iter()
+                .map(|p| self.ops[p].op.clock)
+                .max()
+                .unwrap_or(0);
         ensure!(e.op.clock == max + 1, "bad clock");
         for p in &e.op.parents {
             self.heads.remove(p);
@@ -399,8 +567,13 @@ impl SpaceLog {
     }
 
     pub fn missing_parents(&self) -> Vec<Id> {
-        let mut v: Vec<Id> =
-            self.pending.values().flat_map(|e| e.op.parents.iter()).filter(|p| !self.ops.contains_key(p) && !self.pending.contains_key(p)).copied().collect();
+        let mut v: Vec<Id> = self
+            .pending
+            .values()
+            .flat_map(|e| e.op.parents.iter())
+            .filter(|p| !self.ops.contains_key(p) && !self.pending.contains_key(p))
+            .copied()
+            .collect();
         v.sort();
         v.dedup();
         v
@@ -409,12 +582,14 @@ impl SpaceLog {
     /// The latest accepted kick/ban of `member` together with all its ancestors: enough for an
     /// ex-member to verify their own removal, without revealing anything that happened after.
     pub fn removal_proof(&self, member: &Id) -> Option<Vec<SignedOp>> {
-        let r = self
-            .order()
-            .into_iter()
-            .rev()
-            .find(|e| !self.rejected.contains(&e.id) && revocation_target(&e.op) == Some(*member))?;
-        let mut out: Vec<SignedOp> = self.reach(r.id, false).iter().map(|id| self.ops[id].signed.clone()).collect();
+        let r = self.order().into_iter().rev().find(|e| {
+            !self.rejected.contains(&e.id) && revocation_target(&e.op) == Some(*member)
+        })?;
+        let mut out: Vec<SignedOp> = self
+            .reach(r.id, false)
+            .iter()
+            .map(|id| self.ops[id].signed.clone())
+            .collect();
         out.push(r.signed.clone());
         Some(out)
     }
@@ -432,7 +607,10 @@ impl SpaceLog {
             let next: &[Id] = if forward {
                 self.children.get(&x).map(|v| v.as_slice()).unwrap_or(&[])
             } else {
-                self.ops.get(&x).map(|e| e.op.parents.as_slice()).unwrap_or(&[])
+                self.ops
+                    .get(&x)
+                    .map(|e| e.op.parents.as_slice())
+                    .unwrap_or(&[])
             };
             for n in next {
                 if seen.insert(*n) {
@@ -476,10 +654,15 @@ impl SpaceLog {
             }
             let mut grew = false;
             for (r, target) in revocations {
-                let (anc, desc) =
-                    reach_cache.entry(r).or_insert_with(|| (self.reach(r, false), self.reach(r, true)));
+                let (anc, desc) = reach_cache
+                    .entry(r)
+                    .or_insert_with(|| (self.reach(r, false), self.reach(r, true)));
                 for e in &accepted {
-                    if e.op.author == target && !anc.contains(&e.id) && !desc.contains(&e.id) && void.insert(e.id) {
+                    if e.op.author == target
+                        && !anc.contains(&e.id)
+                        && !desc.contains(&e.id)
+                        && void.insert(e.id)
+                    {
                         grew = true;
                     }
                 }
@@ -500,8 +683,20 @@ impl SpaceLog {
             p.sort();
             p
         };
-        let clock = parents.iter().map(|p| self.ops[p].op.clock).max().unwrap_or(0) + 1;
-        let op = Op { space: self.id, author: key.public().into(), parents, clock, ts: id::now_ms(), body };
+        let clock = parents
+            .iter()
+            .map(|p| self.ops[p].op.clock)
+            .max()
+            .unwrap_or(0)
+            + 1;
+        let op = Op {
+            space: self.id,
+            author: key.public().into(),
+            parents,
+            clock,
+            ts: id::now_ms(),
+            body,
+        };
         let signed = SignedOp::sign(key, &op)?;
         let e = signed.verify()?;
         self.state.clone().apply(&e)?;
@@ -521,7 +716,10 @@ pub fn create_genesis(key: &iroh::SecretKey, name: &str) -> Result<SignedOp> {
         parents: vec![],
         clock: 0,
         ts: id::now_ms(),
-        body: OpBody::Genesis { name: name.into(), nonce: Id(rand::random()) },
+        body: OpBody::Genesis {
+            name: name.into(),
+            nonce: Id(rand::random()),
+        },
     };
     SignedOp::sign(key, &op)
 }
@@ -540,16 +738,44 @@ mod tests {
 
     /// Craft an op with explicit parents (what a malicious peer could send).
     fn forge(log: &SpaceLog, k: &iroh::SecretKey, parents: Vec<Id>, body: OpBody) -> SignedOp {
-        let clock = parents.iter().map(|p| log.get(p).unwrap().op.clock).max().unwrap() + 1;
-        let op = Op { space: log.id, author: idk(k), parents, clock, ts: id::now_ms(), body };
+        let clock = parents
+            .iter()
+            .map(|p| log.get(p).unwrap().op.clock)
+            .max()
+            .unwrap()
+            + 1;
+        let op = Op {
+            space: log.id,
+            author: idk(k),
+            parents,
+            clock,
+            ts: id::now_ms(),
+            body,
+        };
         SignedOp::sign(k, &op).unwrap()
     }
 
     fn join(log: &mut SpaceLog, owner: &iroh::SecretKey, who: &iroh::SecretKey) {
         let inv = key();
-        log.author(owner, OpBody::CreateInvite { key: idk(&inv), expires: None, max_uses: None }).unwrap();
+        log.author(
+            owner,
+            OpBody::CreateInvite {
+                key: idk(&inv),
+                expires: None,
+                max_uses: None,
+            },
+        )
+        .unwrap();
         let proof = id::sign(&inv, op::DOMAIN_JOIN, &join_proof_msg(&log.id, &idk(who)));
-        log.author(who, OpBody::Join { invite: idk(&inv), proof, name: "b".into() }).unwrap();
+        log.author(
+            who,
+            OpBody::Join {
+                invite: idk(&inv),
+                proof,
+                name: "b".into(),
+            },
+        )
+        .unwrap();
     }
 
     fn setup() -> (iroh::SecretKey, iroh::SecretKey, SpaceLog) {
@@ -563,11 +789,36 @@ mod tests {
     fn join_and_permissions() {
         let (o, b, mut log) = setup();
         assert!(log.state.is_member(&idk(&b)));
-        assert!(log.author(&b, OpBody::CreateChannel { name: "x".into(), kind: ChannelKind::Text, private_roles: None }).is_err());
-        log.author(&o, OpBody::CreateChannel { name: "genel".into(), kind: ChannelKind::Text, private_roles: None }).unwrap();
+        assert!(
+            log.author(
+                &b,
+                OpBody::CreateChannel {
+                    name: "x".into(),
+                    kind: ChannelKind::Text,
+                    private_roles: None
+                }
+            )
+            .is_err()
+        );
+        log.author(
+            &o,
+            OpBody::CreateChannel {
+                name: "genel".into(),
+                kind: ChannelKind::Text,
+                private_roles: None,
+            },
+        )
+        .unwrap();
         // forged op bypassing local checks is stored but rejected by replay
         let heads: Vec<Id> = log.heads.iter().copied().collect();
-        let f = forge(&log, &b, heads, OpBody::RenameSpace { name: "pwned".into() });
+        let f = forge(
+            &log,
+            &b,
+            heads,
+            OpBody::RenameSpace {
+                name: "pwned".into(),
+            },
+        );
         let fid = f.id();
         log.insert_many([f]);
         assert!(log.contains(&fid) && log.rejected.contains(&fid));
@@ -579,14 +830,51 @@ mod tests {
         let (o, _b, mut log) = setup();
         let inv = key();
         let c = key();
-        log.author(&o, OpBody::CreateInvite { key: idk(&inv), expires: None, max_uses: Some(1) }).unwrap();
+        log.author(
+            &o,
+            OpBody::CreateInvite {
+                key: idk(&inv),
+                expires: None,
+                max_uses: Some(1),
+            },
+        )
+        .unwrap();
         let wrong = id::sign(&key(), op::DOMAIN_JOIN, &join_proof_msg(&log.id, &idk(&c)));
-        assert!(log.author(&c, OpBody::Join { invite: idk(&inv), proof: wrong, name: "c".into() }).is_err());
+        assert!(
+            log.author(
+                &c,
+                OpBody::Join {
+                    invite: idk(&inv),
+                    proof: wrong,
+                    name: "c".into()
+                }
+            )
+            .is_err()
+        );
         let ok = id::sign(&inv, op::DOMAIN_JOIN, &join_proof_msg(&log.id, &idk(&c)));
-        log.author(&c, OpBody::Join { invite: idk(&inv), proof: ok, name: "c".into() }).unwrap();
+        log.author(
+            &c,
+            OpBody::Join {
+                invite: idk(&inv),
+                proof: ok,
+                name: "c".into(),
+            },
+        )
+        .unwrap();
         let d = key();
         let p = id::sign(&inv, op::DOMAIN_JOIN, &join_proof_msg(&log.id, &idk(&d)));
-        assert!(log.author(&d, OpBody::Join { invite: idk(&inv), proof: p, name: "d".into() }).is_err(), "max_uses");
+        assert!(
+            log.author(
+                &d,
+                OpBody::Join {
+                    invite: idk(&inv),
+                    proof: p,
+                    name: "d".into()
+                }
+            )
+            .is_err(),
+            "max_uses"
+        );
     }
 
     #[test]
@@ -597,7 +885,16 @@ mod tests {
         assert!(!log.state.is_member(&idk(&b)));
         // b forks from before the kick and creates an invite to sneak back in
         let inv = key();
-        let f = forge(&log, &b, before_kick, OpBody::CreateInvite { key: idk(&inv), expires: None, max_uses: None });
+        let f = forge(
+            &log,
+            &b,
+            before_kick,
+            OpBody::CreateInvite {
+                key: idk(&inv),
+                expires: None,
+                max_uses: None,
+            },
+        );
         let fid = f.id();
         log.insert_many([f]);
         assert!(log.rejected.contains(&fid));
@@ -607,28 +904,117 @@ mod tests {
     #[test]
     fn ranks_enforced() {
         let (o, b, mut log) = setup();
-        let mod_role = log.author(&o, OpBody::CreateRole { name: "mod".into(), color: 0, perms: Perms(Perms::MANAGE_ROLES.0 | Perms::KICK.0), rank: 5 }).unwrap().id();
-        log.author(&o, OpBody::AssignRole { member: idk(&b), role: mod_role, on: true }).unwrap();
+        let mod_role = log
+            .author(
+                &o,
+                OpBody::CreateRole {
+                    name: "mod".into(),
+                    color: 0,
+                    perms: Perms(Perms::MANAGE_ROLES.0 | Perms::KICK.0),
+                    rank: 5,
+                },
+            )
+            .unwrap()
+            .id();
+        log.author(
+            &o,
+            OpBody::AssignRole {
+                member: idk(&b),
+                role: mod_role,
+                on: true,
+            },
+        )
+        .unwrap();
         // b can create a lower role but not an equal/higher one, nor grant perms it lacks
-        assert!(log.author(&b, OpBody::CreateRole { name: "x".into(), color: 0, perms: Perms(0), rank: 5 }).is_err());
-        assert!(log.author(&b, OpBody::CreateRole { name: "x".into(), color: 0, perms: Perms::BAN, rank: 2 }).is_err());
-        log.author(&b, OpBody::CreateRole { name: "x".into(), color: 0, perms: Perms::KICK, rank: 2 }).unwrap();
+        assert!(
+            log.author(
+                &b,
+                OpBody::CreateRole {
+                    name: "x".into(),
+                    color: 0,
+                    perms: Perms(0),
+                    rank: 5
+                }
+            )
+            .is_err()
+        );
+        assert!(
+            log.author(
+                &b,
+                OpBody::CreateRole {
+                    name: "x".into(),
+                    color: 0,
+                    perms: Perms::BAN,
+                    rank: 2
+                }
+            )
+            .is_err()
+        );
+        log.author(
+            &b,
+            OpBody::CreateRole {
+                name: "x".into(),
+                color: 0,
+                perms: Perms::KICK,
+                rank: 2,
+            },
+        )
+        .unwrap();
         assert!(log.author(&b, OpBody::Kick { member: idk(&o) }).is_err());
-        assert!(log.author(&b, OpBody::UpdateRole { role: mod_role, name: "mod".into(), color: 0, perms: Perms::ALL, rank: 9 }).is_err());
+        assert!(
+            log.author(
+                &b,
+                OpBody::UpdateRole {
+                    role: mod_role,
+                    name: "mod".into(),
+                    color: 0,
+                    perms: Perms::ALL,
+                    rank: 9
+                }
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn converges_in_any_order() {
         let (o, b, mut log) = setup();
-        let r = log.author(&o, OpBody::CreateRole { name: "r".into(), color: 0, perms: Perms::KICK, rank: 1 }).unwrap();
-        log.author(&o, OpBody::AssignRole { member: idk(&b), role: r.id(), on: true }).unwrap();
-        log.author(&o, OpBody::RenameSpace { name: "yeni".into() }).unwrap();
+        let r = log
+            .author(
+                &o,
+                OpBody::CreateRole {
+                    name: "r".into(),
+                    color: 0,
+                    perms: Perms::KICK,
+                    rank: 1,
+                },
+            )
+            .unwrap();
+        log.author(
+            &o,
+            OpBody::AssignRole {
+                member: idk(&b),
+                role: r.id(),
+                on: true,
+            },
+        )
+        .unwrap();
+        log.author(
+            &o,
+            OpBody::RenameSpace {
+                name: "yeni".into(),
+            },
+        )
+        .unwrap();
         let mut all: Vec<SignedOp> = log.entries().map(|e| e.signed.clone()).collect();
         all.reverse();
         let mut other = SpaceLog::new(log.genesis().clone()).unwrap();
         other.insert_many(all);
         assert_eq!(other.len(), log.len());
         assert_eq!(other.state.name, "yeni");
-        assert_eq!(other.state.members[&idk(&b)].roles, log.state.members[&idk(&b)].roles);
+        assert_eq!(
+            other.state.members[&idk(&b)].roles,
+            log.state.members[&idk(&b)].roles
+        );
     }
 }

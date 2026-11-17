@@ -42,21 +42,57 @@ pub struct JoinReq {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Frame {
     /// First frame from the dialer: spaces it believes we share, or a join request.
-    Hello { spaces: Vec<Id>, join: Option<JoinReq> },
+    Hello {
+        spaces: Vec<Id>,
+        join: Option<JoinReq>,
+    },
     /// Acceptor's answer: the spaces this connection is allowed to talk about.
-    Welcome { spaces: Vec<Id> },
-    OpSummary { space: Id, buckets: Vec<Bucket> },
-    OpIds { space: Id, bucket: u64, ids: Vec<Id> },
-    WantOps { space: Id, ids: Vec<Id> },
-    Ops { space: Id, ops: Vec<SignedOp> },
-    MsgSummary { space: Id, channel: Id, buckets: Vec<Bucket> },
-    MsgIds { space: Id, channel: Id, bucket: u64, ids: Vec<Id> },
+    Welcome {
+        spaces: Vec<Id>,
+    },
+    OpSummary {
+        space: Id,
+        buckets: Vec<Bucket>,
+    },
+    OpIds {
+        space: Id,
+        bucket: u64,
+        ids: Vec<Id>,
+    },
+    WantOps {
+        space: Id,
+        ids: Vec<Id>,
+    },
+    Ops {
+        space: Id,
+        ops: Vec<SignedOp>,
+    },
+    MsgSummary {
+        space: Id,
+        channel: Id,
+        buckets: Vec<Bucket>,
+    },
+    MsgIds {
+        space: Id,
+        channel: Id,
+        bucket: u64,
+        ids: Vec<Id>,
+    },
     /// `live`: a fresh push (vs. history from reconciliation).
-    Msgs { space: Id, msgs: Vec<SignedMsg>, live: bool },
+    Msgs {
+        space: Id,
+        msgs: Vec<SignedMsg>,
+        live: bool,
+    },
     /// Sender's own voice presence in a space (None = not in voice there).
-    Presence { space: Id, voice: Option<Presence> },
+    Presence {
+        space: Id,
+        voice: Option<Presence>,
+    },
     /// Ask the remote to start/stop sending us its screen share.
-    Watch { on: bool },
+    Watch {
+        on: bool,
+    },
     /// Watcher asks the sharer for a key frame.
     Keyframe,
 }
@@ -89,7 +125,11 @@ pub fn summarize(items: impl IntoIterator<Item = (u64, Id)>, width: u64) -> Vec<
     let mut out: std::collections::BTreeMap<u64, Bucket> = Default::default();
     for (k, id) in items {
         let key = k / width;
-        let b = out.entry(key).or_insert(Bucket { key, count: 0, xor: Id::ZERO });
+        let b = out.entry(key).or_insert(Bucket {
+            key,
+            count: 0,
+            xor: Id::ZERO,
+        });
         b.count += 1;
         for (x, y) in b.xor.0.iter_mut().zip(id.0) {
             *x ^= y;
@@ -113,7 +153,10 @@ mod tests {
     #[test]
     fn diff_finds_mismatch() {
         let a = summarize([(1, Id([1; 32])), (70, Id([2; 32]))], 64);
-        let b = summarize([(1, Id([1; 32])), (70, Id([3; 32])), (200, Id([4; 32]))], 64);
+        let b = summarize(
+            [(1, Id([1; 32])), (70, Id([3; 32])), (200, Id([4; 32]))],
+            64,
+        );
         assert_eq!(diff(&a, &b), vec![1, 3]);
         assert!(diff(&a, &a).is_empty());
     }

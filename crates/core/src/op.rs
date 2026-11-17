@@ -23,22 +23,71 @@ pub enum ChannelKind {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum OpBody {
-    Genesis { name: String, nonce: Id },
-    RenameSpace { name: String },
-    CreateChannel { name: String, kind: ChannelKind, private_roles: Option<Vec<Id>> },
-    UpdateChannel { channel: Id, name: String, private_roles: Option<Vec<Id>> },
-    DeleteChannel { channel: Id },
-    CreateRole { name: String, color: u32, perms: Perms, rank: u32 },
-    UpdateRole { role: Id, name: String, color: u32, perms: Perms, rank: u32 },
-    DeleteRole { role: Id },
-    AssignRole { member: Id, role: Id, on: bool },
-    CreateInvite { key: Id, expires: Option<u64>, max_uses: Option<u32> },
-    RevokeInvite { key: Id },
+    Genesis {
+        name: String,
+        nonce: Id,
+    },
+    RenameSpace {
+        name: String,
+    },
+    CreateChannel {
+        name: String,
+        kind: ChannelKind,
+        private_roles: Option<Vec<Id>>,
+    },
+    UpdateChannel {
+        channel: Id,
+        name: String,
+        private_roles: Option<Vec<Id>>,
+    },
+    DeleteChannel {
+        channel: Id,
+    },
+    CreateRole {
+        name: String,
+        color: u32,
+        perms: Perms,
+        rank: u32,
+    },
+    UpdateRole {
+        role: Id,
+        name: String,
+        color: u32,
+        perms: Perms,
+        rank: u32,
+    },
+    DeleteRole {
+        role: Id,
+    },
+    AssignRole {
+        member: Id,
+        role: Id,
+        on: bool,
+    },
+    CreateInvite {
+        key: Id,
+        expires: Option<u64>,
+        max_uses: Option<u32>,
+    },
+    RevokeInvite {
+        key: Id,
+    },
     /// Authored by the joiner. `proof` is the invite key's signature over (space, joiner).
-    Join { invite: Id, proof: Sig, name: String },
-    SetName { name: String },
-    Kick { member: Id },
-    Ban { member: Id, on: bool },
+    Join {
+        invite: Id,
+        proof: Sig,
+        name: String,
+    },
+    SetName {
+        name: String,
+    },
+    Kick {
+        member: Id,
+    },
+    Ban {
+        member: Id,
+        on: bool,
+    },
     Leave,
 }
 
@@ -75,7 +124,10 @@ impl SignedOp {
     pub fn sign(key: &iroh::SecretKey, op: &Op) -> Result<SignedOp> {
         let bytes = postcard::to_stdvec(op)?;
         ensure!(bytes.len() <= MAX_OP_BYTES, "işlem çok büyük");
-        Ok(SignedOp { sig: id::sign(key, DOMAIN_OP, &bytes), bytes })
+        Ok(SignedOp {
+            sig: id::sign(key, DOMAIN_OP, &bytes),
+            bytes,
+        })
     }
 
     /// Id is the hash of the op bytes only, so signature malleability can't fork identities.
@@ -87,32 +139,65 @@ impl SignedOp {
     pub fn verify(&self) -> Result<Entry> {
         ensure!(self.bytes.len() <= MAX_OP_BYTES, "op too large");
         let op: Op = postcard::from_bytes(&self.bytes)?;
-        ensure!(postcard::to_stdvec(&op)? == self.bytes, "non-canonical op encoding");
-        ensure!(id::verify(&op.author, DOMAIN_OP, &self.bytes, &self.sig), "bad op signature");
+        ensure!(
+            postcard::to_stdvec(&op)? == self.bytes,
+            "non-canonical op encoding"
+        );
+        ensure!(
+            id::verify(&op.author, DOMAIN_OP, &self.bytes, &self.sig),
+            "bad op signature"
+        );
         ensure!(op.parents.len() <= MAX_PARENTS, "too many parents");
-        ensure!(op.parents.windows(2).all(|w| w[0] < w[1]), "parents not sorted/unique");
+        ensure!(
+            op.parents.windows(2).all(|w| w[0] < w[1]),
+            "parents not sorted/unique"
+        );
         match &op.body {
             OpBody::Genesis { name, .. } => {
-                ensure!(op.space == Id::ZERO && op.parents.is_empty() && op.clock == 0, "bad genesis");
+                ensure!(
+                    op.space == Id::ZERO && op.parents.is_empty() && op.clock == 0,
+                    "bad genesis"
+                );
                 check_name(name)?;
             }
             body => {
-                ensure!(op.space != Id::ZERO && !op.parents.is_empty() && op.clock > 0, "bad op header");
+                ensure!(
+                    op.space != Id::ZERO && !op.parents.is_empty() && op.clock > 0,
+                    "bad op header"
+                );
                 match body {
                     OpBody::RenameSpace { name }
                     | OpBody::CreateRole { name, .. }
                     | OpBody::UpdateRole { name, .. }
                     | OpBody::SetName { name }
                     | OpBody::Join { name, .. } => check_name(name)?,
-                    OpBody::CreateChannel { name, private_roles, .. } | OpBody::UpdateChannel { name, private_roles, .. } => {
+                    OpBody::CreateChannel {
+                        name,
+                        private_roles,
+                        ..
+                    }
+                    | OpBody::UpdateChannel {
+                        name,
+                        private_roles,
+                        ..
+                    } => {
                         check_name(name)?;
-                        ensure!(private_roles.as_ref().is_none_or(|r| r.len() <= MAX_PRIVATE_ROLES), "too many roles");
+                        ensure!(
+                            private_roles
+                                .as_ref()
+                                .is_none_or(|r| r.len() <= MAX_PRIVATE_ROLES),
+                            "too many roles"
+                        );
                     }
                     _ => {}
                 }
             }
         }
-        Ok(Entry { id: self.id(), op, signed: self.clone() })
+        Ok(Entry {
+            id: self.id(),
+            op,
+            signed: self.clone(),
+        })
     }
 }
 

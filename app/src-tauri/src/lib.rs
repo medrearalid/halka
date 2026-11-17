@@ -46,54 +46,138 @@ fn leave_space(n: State<Node>, space: Id) -> R<()> {
 
 #[tauri::command]
 fn rename_space(n: State<Node>, space: Id, name: String) -> R<()> {
-    n.op(space, OpBody::RenameSpace { name: name.trim().into() }).map(|_| ()).map_err(e)
+    n.op(
+        space,
+        OpBody::RenameSpace {
+            name: name.trim().into(),
+        },
+    )
+    .map(|_| ())
+    .map_err(e)
 }
 
 #[tauri::command]
-fn create_invite(n: State<Node>, space: Id, expires_in_ms: Option<u64>, max_uses: Option<u32>) -> R<String> {
+fn create_invite(
+    n: State<Node>,
+    space: Id,
+    expires_in_ms: Option<u64>,
+    max_uses: Option<u32>,
+) -> R<String> {
     n.create_invite(space, expires_in_ms, max_uses).map_err(e)
 }
 
 #[tauri::command]
 fn revoke_invite(n: State<Node>, space: Id, invite: Id) -> R<()> {
-    n.op(space, OpBody::RevokeInvite { key: invite }).map(|_| ()).map_err(e)
+    n.op(space, OpBody::RevokeInvite { key: invite })
+        .map(|_| ())
+        .map_err(e)
 }
 
 #[tauri::command]
-fn create_channel(n: State<Node>, space: Id, name: String, kind: ChannelKind, private_roles: Option<Vec<Id>>) -> R<Id> {
-    n.op(space, OpBody::CreateChannel { name: name.trim().into(), kind, private_roles }).map_err(e)
+fn create_channel(
+    n: State<Node>,
+    space: Id,
+    name: String,
+    kind: ChannelKind,
+    private_roles: Option<Vec<Id>>,
+) -> R<Id> {
+    n.op(
+        space,
+        OpBody::CreateChannel {
+            name: name.trim().into(),
+            kind,
+            private_roles,
+        },
+    )
+    .map_err(e)
 }
 
 #[tauri::command]
-fn update_channel(n: State<Node>, space: Id, channel: Id, name: String, private_roles: Option<Vec<Id>>) -> R<()> {
-    n.op(space, OpBody::UpdateChannel { channel, name: name.trim().into(), private_roles }).map(|_| ()).map_err(e)
+fn update_channel(
+    n: State<Node>,
+    space: Id,
+    channel: Id,
+    name: String,
+    private_roles: Option<Vec<Id>>,
+) -> R<()> {
+    n.op(
+        space,
+        OpBody::UpdateChannel {
+            channel,
+            name: name.trim().into(),
+            private_roles,
+        },
+    )
+    .map(|_| ())
+    .map_err(e)
 }
 
 #[tauri::command]
 fn delete_channel(n: State<Node>, space: Id, channel: Id) -> R<()> {
-    n.op(space, OpBody::DeleteChannel { channel }).map(|_| ()).map_err(e)
+    n.op(space, OpBody::DeleteChannel { channel })
+        .map(|_| ())
+        .map_err(e)
 }
 
 #[tauri::command]
-fn create_role(n: State<Node>, space: Id, name: String, color: u32, perms: Vec<String>, rank: u32) -> R<Id> {
+fn create_role(
+    n: State<Node>,
+    space: Id,
+    name: String,
+    color: u32,
+    perms: Vec<String>,
+    rank: u32,
+) -> R<Id> {
     let perms = Perms::from_names(&perms).map_err(e)?;
-    n.op(space, OpBody::CreateRole { name: name.trim().into(), color, perms, rank }).map_err(e)
+    n.op(
+        space,
+        OpBody::CreateRole {
+            name: name.trim().into(),
+            color,
+            perms,
+            rank,
+        },
+    )
+    .map_err(e)
 }
 
 #[tauri::command]
-fn update_role(n: State<Node>, space: Id, role: Id, name: String, color: u32, perms: Vec<String>, rank: u32) -> R<()> {
+fn update_role(
+    n: State<Node>,
+    space: Id,
+    role: Id,
+    name: String,
+    color: u32,
+    perms: Vec<String>,
+    rank: u32,
+) -> R<()> {
     let perms = Perms::from_names(&perms).map_err(e)?;
-    n.op(space, OpBody::UpdateRole { role, name: name.trim().into(), color, perms, rank }).map(|_| ()).map_err(e)
+    n.op(
+        space,
+        OpBody::UpdateRole {
+            role,
+            name: name.trim().into(),
+            color,
+            perms,
+            rank,
+        },
+    )
+    .map(|_| ())
+    .map_err(e)
 }
 
 #[tauri::command]
 fn delete_role(n: State<Node>, space: Id, role: Id) -> R<()> {
-    n.op(space, OpBody::DeleteRole { role }).map(|_| ()).map_err(e)
+    n.op(space, OpBody::DeleteRole { role })
+        .map(|_| ())
+        .map_err(e)
 }
 
 #[tauri::command]
 fn assign_role(n: State<Node>, space: Id, member: Id, role: Id, on: bool) -> R<()> {
-    n.op(space, OpBody::AssignRole { member, role, on }).map(|_| ()).map_err(e)
+    n.op(space, OpBody::AssignRole { member, role, on })
+        .map(|_| ())
+        .map_err(e)
 }
 
 #[tauri::command]
@@ -103,16 +187,30 @@ fn kick(n: State<Node>, space: Id, member: Id) -> R<()> {
 
 #[tauri::command]
 fn ban(n: State<Node>, space: Id, member: Id, on: bool) -> R<()> {
-    n.op(space, OpBody::Ban { member, on }).map(|_| ()).map_err(e)
+    n.op(space, OpBody::Ban { member, on })
+        .map(|_| ())
+        .map_err(e)
 }
 
 #[tauri::command]
-fn messages(n: State<Node>, space: Id, channel: Id, before: Option<u64>, limit: usize) -> R<Vec<MessageView>> {
+fn messages(
+    n: State<Node>,
+    space: Id,
+    channel: Id,
+    before: Option<u64>,
+    limit: usize,
+) -> R<Vec<MessageView>> {
     n.messages(space, channel, before, limit).map_err(e)
 }
 
 #[tauri::command]
-fn send_message(n: State<Node>, space: Id, channel: Id, text: String, reply_to: Option<Id>) -> R<Id> {
+fn send_message(
+    n: State<Node>,
+    space: Id,
+    channel: Id,
+    text: String,
+    reply_to: Option<Id>,
+) -> R<Id> {
     n.send_message(space, channel, &text, reply_to).map_err(e)
 }
 
@@ -232,10 +330,14 @@ async fn pump(app: AppHandle, node: Node, mut rx: tokio::sync::mpsc::UnboundedRe
             }
             Event::Message(m) => app.emit("message", m),
             Event::Levels(l) => {
-                let map: serde_json::Map<String, serde_json::Value> = l.into_iter().map(|(id, v)| (id.hex(), json!(v))).collect();
+                let map: serde_json::Map<String, serde_json::Value> =
+                    l.into_iter().map(|(id, v)| (id.hex(), json!(v))).collect();
                 app.emit("levels", map)
             }
-            Event::Notice { error, text } => app.emit("notice", json!({ "kind": if error { "error" } else { "info" }, "text": text })),
+            Event::Notice { error, text } => app.emit(
+                "notice",
+                json!({ "kind": if error { "error" } else { "info" }, "text": text }),
+            ),
             Event::StreamEnded(m) => app.emit("stream_ended", json!({ "member": m })),
             Event::StreamKeyframe => app.emit("stream_keyframe", json!({})),
         };
@@ -257,11 +359,19 @@ fn profile() -> Option<String> {
 }
 
 pub fn run() {
-    let _ = tracing_subscriber::fmt().with_env_filter(std::env::var("RUST_LOG").unwrap_or_else(|_| "warn,halka_core=info".into())).try_init();
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(
+            std::env::var("RUST_LOG").unwrap_or_else(|_| "warn,halka_core=info".into()),
+        )
+        .try_init();
     tauri::Builder::default()
         .setup(|app| {
             let mut dir = app.path().app_data_dir()?;
-            if let Some(p) = profile().filter(|p| p.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') && !p.is_empty()) {
+            if let Some(p) = profile().filter(|p| {
+                p.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                    && !p.is_empty()
+            }) {
                 dir = dir.join("profiles").join(p);
             }
             let (node, rx) = tauri::async_runtime::block_on(Node::start(&dir))?;

@@ -159,7 +159,10 @@ pub enum Event {
     Changed,
     Message(MessageView),
     Levels(Vec<(Id, f32)>),
-    Notice { error: bool, text: String },
+    Notice {
+        error: bool,
+        text: String,
+    },
     StreamEnded(Id),
     /// We're sharing and a watcher needs a key frame.
     StreamKeyframe,

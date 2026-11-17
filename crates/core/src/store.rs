@@ -93,7 +93,10 @@ impl Store {
         {
             let mut t = w.open_table(OPS)?;
             for o in ops {
-                t.insert(key(&[&space.0, &o.id().0]).as_slice(), postcard::to_stdvec(o)?.as_slice())?;
+                t.insert(
+                    key(&[&space.0, &o.id().0]).as_slice(),
+                    postcard::to_stdvec(o)?.as_slice(),
+                )?;
             }
         }
         w.commit()?;
@@ -132,7 +135,11 @@ impl Store {
         };
         let w = self.db.begin_write()?;
         {
-            let (mut idx, mut loc, mut extra) = (w.open_table(MSG_IDX)?, w.open_table(MSG_LOC)?, w.open_table(MSG_EXTRA)?);
+            let (mut idx, mut loc, mut extra) = (
+                w.open_table(MSG_IDX)?,
+                w.open_table(MSG_LOC)?,
+                w.open_table(MSG_EXTRA)?,
+            );
             for id in &ids {
                 idx.remove(id)?;
                 loc.remove(id)?;
@@ -143,10 +150,14 @@ impl Store {
         {
             let start = space.0.to_vec();
             let end = prefix_end(&start);
-            w.open_table(OPS)?.retain_in(start.as_slice()..end.as_slice(), |_, _| false)?;
-            w.open_table(MSGS)?.retain_in(start.as_slice()..end.as_slice(), |_, _| false)?;
-            w.open_table(MSG_SYNC)?.retain_in(start.as_slice()..end.as_slice(), |_, _| false)?;
-            w.open_table(READ)?.retain_in(start.as_slice()..end.as_slice(), |_, _| false)?;
+            w.open_table(OPS)?
+                .retain_in(start.as_slice()..end.as_slice(), |_, _| false)?;
+            w.open_table(MSGS)?
+                .retain_in(start.as_slice()..end.as_slice(), |_, _| false)?;
+            w.open_table(MSG_SYNC)?
+                .retain_in(start.as_slice()..end.as_slice(), |_, _| false)?;
+            w.open_table(READ)?
+                .retain_in(start.as_slice()..end.as_slice(), |_, _| false)?;
         }
         w.commit()?;
         Ok(())
@@ -172,11 +183,13 @@ impl Store {
             w.open_table(MSG_SYNC)?.insert(sk.as_slice(), ())?;
             match &m.body {
                 MsgBody::Text { .. } => {
-                    w.open_table(MSGS)?.insert(sk.as_slice(), bytes.as_slice())?;
+                    w.open_table(MSGS)?
+                        .insert(sk.as_slice(), bytes.as_slice())?;
                     w.open_table(MSG_LOC)?.insert(&id.0, sk.as_slice())?;
                 }
                 MsgBody::Edit { target, .. } | MsgBody::Delete { target } => {
-                    w.open_table(MSG_EXTRA)?.insert(key(&[&target.0, &id.0]).as_slice(), bytes.as_slice())?;
+                    w.open_table(MSG_EXTRA)?
+                        .insert(key(&[&target.0, &id.0]).as_slice(), bytes.as_slice())?;
                 }
             }
         }
@@ -199,8 +212,12 @@ impl Store {
     /// Text message by id, materialized with edits/deletes.
     pub fn msg_view(&self, id: &Id) -> Result<Option<StoredMsg>> {
         let r = self.db.begin_read()?;
-        let Some(sk) = r.open_table(MSG_LOC)?.get(&id.0)? else { return Ok(None) };
-        let Some(v) = r.open_table(MSGS)?.get(sk.value())? else { return Ok(None) };
+        let Some(sk) = r.open_table(MSG_LOC)?.get(&id.0)? else {
+            return Ok(None);
+        };
+        let Some(v) = r.open_table(MSGS)?.get(sk.value())? else {
+            return Ok(None);
+        };
         let s: SignedMsg = postcard::from_bytes(v.value())?;
         self.materialize(&r, s).map(Some)
     }
@@ -208,8 +225,17 @@ impl Store {
     fn materialize(&self, r: &redb::ReadTransaction, s: SignedMsg) -> Result<StoredMsg> {
         let id = s.id();
         let msg: Msg = postcard::from_bytes(&s.bytes)?;
-        let MsgBody::Text { text, reply_to } = msg.body.clone() else { anyhow::bail!("not text") };
-        let mut out = StoredMsg { id, msg, text, reply_to, edited: false, deleted: false };
+        let MsgBody::Text { text, reply_to } = msg.body.clone() else {
+            anyhow::bail!("not text")
+        };
+        let mut out = StoredMsg {
+            id,
+            msg,
+            text,
+            reply_to,
+            edited: false,
+            deleted: false,
+        };
         let extra = r.open_table(MSG_EXTRA)?;
         let start = id.0.to_vec();
         let end = prefix_end(&start);
@@ -236,7 +262,13 @@ impl Store {
     }
 
     /// Up to `limit` text messages older than `before`, oldest first.
-    pub fn page(&self, space: &Id, channel: &Id, before: Option<u64>, limit: usize) -> Result<Vec<StoredMsg>> {
+    pub fn page(
+        &self,
+        space: &Id,
+        channel: &Id,
+        before: Option<u64>,
+        limit: usize,
+    ) -> Result<Vec<StoredMsg>> {
         let r = self.db.begin_read()?;
         let t = r.open_table(MSGS)?;
         let p = chan_prefix(space, channel);
@@ -256,11 +288,19 @@ impl Store {
     pub fn unread(&self, space: &Id, channel: &Id, me: &Id) -> Result<u32> {
         let r = self.db.begin_read()?;
         let p = chan_prefix(space, channel);
-        let since = r.open_table(READ)?.get(p.as_slice())?.map(|v| v.value()).unwrap_or(0);
+        let since = r
+            .open_table(READ)?
+            .get(p.as_slice())?
+            .map(|v| v.value())
+            .unwrap_or(0);
         let t = r.open_table(MSGS)?;
         let start = key(&[&p, &(since + 1).to_be_bytes()]);
         let mut n = 0;
-        for kv in t.range(start.as_slice()..prefix_end(&p).as_slice())?.rev().take(100) {
+        for kv in t
+            .range(start.as_slice()..prefix_end(&p).as_slice())?
+            .rev()
+            .take(100)
+        {
             let (_, v) = kv?;
             let s: SignedMsg = postcard::from_bytes(v.value())?;
             if postcard::from_bytes::<Msg>(&s.bytes)?.author != *me {
@@ -285,16 +325,28 @@ impl Store {
     }
 
     /// (ts, id) of every message in a channel within [from, to).
-    pub fn sync_items(&self, space: &Id, channel: &Id, from: u64, to: u64) -> Result<Vec<(u64, Id)>> {
+    pub fn sync_items(
+        &self,
+        space: &Id,
+        channel: &Id,
+        from: u64,
+        to: u64,
+    ) -> Result<Vec<(u64, Id)>> {
         let r = self.db.begin_read()?;
         let t = r.open_table(MSG_SYNC)?;
         let p = chan_prefix(space, channel);
-        let (s, e) = (key(&[&p, &from.to_be_bytes()]), key(&[&p, &to.to_be_bytes()]));
+        let (s, e) = (
+            key(&[&p, &from.to_be_bytes()]),
+            key(&[&p, &to.to_be_bytes()]),
+        );
         let mut out = Vec::new();
         for kv in t.range(s.as_slice()..e.as_slice())? {
             let (k, _) = kv?;
             let k = k.value();
-            out.push((u64::from_be_bytes(k[64..72].try_into()?), Id(k[72..104].try_into()?)));
+            out.push((
+                u64::from_be_bytes(k[64..72].try_into()?),
+                Id(k[72..104].try_into()?),
+            ));
         }
         Ok(out)
     }

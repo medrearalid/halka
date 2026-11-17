@@ -99,7 +99,10 @@ impl Inner {
         let _ = self.ev.send(e);
     }
     pub fn notice(&self, error: bool, text: impl Into<String>) {
-        self.emit(Event::Notice { error, text: text.into() });
+        self.emit(Event::Notice {
+            error,
+            text: text.into(),
+        });
     }
 }
 
@@ -109,12 +112,20 @@ impl Node {
         let store = Store::open(&data_dir.join("halka.redb"))?;
         let key = crate::identity::load_or_create(&store)?;
         let me: Id = key.public().into();
-        let settings: Settings = store.meta("settings")?.and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-        let name = store.meta("name")?.and_then(|b| String::from_utf8(b).ok()).unwrap_or_default();
+        let settings: Settings = store
+            .meta("settings")?
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default();
+        let name = store
+            .meta("name")?
+            .and_then(|b| String::from_utf8(b).ok())
+            .unwrap_or_default();
 
         let mut spaces = BTreeMap::new();
         for (sid, ops) in store.load_spaces()? {
-            let Some(g) = ops.iter().find(|o| o.id() == sid).cloned() else { continue };
+            let Some(g) = ops.iter().find(|o| o.id() == sid).cloned() else {
+                continue;
+            };
             let mut log = SpaceLog::new(g)?;
             log.insert_many(ops);
             if log.state.is_member(&me) {
@@ -130,13 +141,25 @@ impl Node {
                 lookup.add_endpoint_info(a);
             }
         }
-        let mut b = Endpoint::builder(presets::N0).secret_key(key.clone()).alpns(vec![wire::ALPN.to_vec()]).address_lookup(lookup.clone());
-        let relays: Vec<iroh::RelayUrl> = settings.relays.iter().filter_map(|u| u.parse().ok()).collect();
+        let mut b = Endpoint::builder(presets::N0)
+            .secret_key(key.clone())
+            .alpns(vec![wire::ALPN.to_vec()])
+            .address_lookup(lookup.clone());
+        let relays: Vec<iroh::RelayUrl> = settings
+            .relays
+            .iter()
+            .filter_map(|u| u.parse().ok())
+            .collect();
         if !relays.is_empty() {
             b = b.relay_mode(RelayMode::custom(relays));
         }
         if settings.relay_only {
             b = b.clear_ip_transports();
+        } else {
+            // LAN discovery: friends on the same network connect with no internet at all
+            b = b.address_lookup(
+                iroh_mdns_address_lookup::MdnsAddressLookup::builder().service_name("halka"),
+            );
         }
         let ep = b.bind().await.context("ağ başlatılamadı")?;
 
@@ -162,7 +185,9 @@ impl Node {
                 online: false,
             }),
             voice_targets: RwLock::new(Vec::new()),
-            last_keyframe: Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(5)),
+            last_keyframe: Mutex::new(
+                std::time::Instant::now() - std::time::Duration::from_secs(5),
+            ),
         });
         crate::net::spawn_background(&inner);
         Ok((Node(inner), rx))
@@ -182,12 +207,25 @@ impl Node {
     pub fn snapshot(&self) -> Snapshot {
         let i = &self.0;
         let st = i.st.lock();
-        let spaces = st.spaces.values().map(|log| space_view(i, &st, log)).collect();
+        let spaces = st
+            .spaces
+            .values()
+            .map(|log| space_view(i, &st, log))
+            .collect();
         Snapshot {
-            me: api::Me { id: i.me, name: st.name.clone(), code: api::safety_code(&i.me) },
+            me: api::Me {
+                id: i.me,
+                name: st.name.clone(),
+                code: api::safety_code(&i.me),
+            },
             spaces,
             settings: st.settings.clone(),
-            voice: st.voice.as_ref().map(|v| api::MyVoice { space: v.space, channel: v.channel, muted: v.muted, deafened: v.deafened }),
+            voice: st.voice.as_ref().map(|v| api::MyVoice {
+                space: v.space,
+                channel: v.channel,
+                muted: v.muted,
+                deafened: v.deafened,
+            }),
             online: st.online,
         }
     }
@@ -203,7 +241,12 @@ impl Node {
         st.name = name.to_string();
         let ids: Vec<Id> = st.spaces.keys().copied().collect();
         for s in ids {
-            if st.spaces[&s].state.members.get(&i.me).is_some_and(|m| m.name != name) {
+            if st.spaces[&s]
+                .state
+                .members
+                .get(&i.me)
+                .is_some_and(|m| m.name != name)
+            {
                 let _ = author(i, &mut st, s, OpBody::SetName { name: name.into() });
             }
         }
@@ -222,11 +265,23 @@ impl Node {
         let sid = log.id;
         let mut ops = vec![g];
         let my_name = i.st.lock().name.clone();
-        let my_name = if my_name.is_empty() { "Kurucu".to_string() } else { my_name };
+        let my_name = if my_name.is_empty() {
+            "Kurucu".to_string()
+        } else {
+            my_name
+        };
         for body in [
             OpBody::SetName { name: my_name },
-            OpBody::CreateChannel { name: "genel".into(), kind: ChannelKind::Text, private_roles: None },
-            OpBody::CreateChannel { name: "Sohbet".into(), kind: ChannelKind::Voice, private_roles: None },
+            OpBody::CreateChannel {
+                name: "genel".into(),
+                kind: ChannelKind::Text,
+                private_roles: None,
+            },
+            OpBody::CreateChannel {
+                name: "Sohbet".into(),
+                kind: ChannelKind::Voice,
+                private_roles: None,
+            },
         ] {
             ops.push(log.author(&i.key, body)?);
         }
@@ -245,31 +300,55 @@ impl Node {
         }
         ensure!(!c.peers.is_empty(), "davet kodunda bağlanılacak kimse yok");
         let (done_tx, done_rx) = oneshot::channel();
-        i.st.lock().joins.insert(sid, PendingJoin { invite: c.key(), done: Some(done_tx) });
+        i.st.lock().joins.insert(
+            sid,
+            PendingJoin {
+                invite: c.key(),
+                done: Some(done_tx),
+            },
+        );
         for p in &c.peers {
             i.lookup.add_endpoint_info(p.clone());
         }
         let proof = id::sign(&c.key(), op::DOMAIN_JOIN, &op::join_proof_msg(&sid, &i.me));
-        let req = wire::JoinReq { space: sid, invite: c.key().public().into(), proof };
-        let peers: Vec<Id> = c.peers.iter().map(|p| p.id.into()).filter(|p| *p != i.me).collect();
+        let req = wire::JoinReq {
+            space: sid,
+            invite: c.key().public().into(),
+            proof,
+        };
+        let peers: Vec<Id> = c
+            .peers
+            .iter()
+            .map(|p| p.id.into())
+            .filter(|p| *p != i.me)
+            .collect();
         let dialer = i.clone();
         tokio::spawn(async move {
             for p in peers {
-                if crate::net::dial(&dialer, p, Some(req.clone())).await.is_ok() {
+                if crate::net::dial(&dialer, p, Some(req.clone()))
+                    .await
+                    .is_ok()
+                {
                     return;
                 }
             }
             if let Some(j) = dialer.st.lock().joins.get_mut(&sid)
                 && let Some(d) = j.done.take()
             {
-                let _ = d.send(Err(anyhow::anyhow!("davetteki kişilerin hiçbirine ulaşılamadı; biri çevrimiçi olunca tekrar dene")));
+                let _ = d.send(Err(anyhow::anyhow!(
+                    "davetteki kişilerin hiçbirine ulaşılamadı; biri çevrimiçi olunca tekrar dene"
+                )));
             }
         });
         let r = tokio::time::timeout(std::time::Duration::from_secs(45), done_rx).await;
         {
             let mut st = i.st.lock();
             st.joins.remove(&sid);
-            if st.spaces.get(&sid).is_some_and(|l| !l.state.is_member(&i.me)) {
+            if st
+                .spaces
+                .get(&sid)
+                .is_some_and(|l| !l.state.is_member(&i.me))
+            {
                 drop_space_locked(&i, &mut st, sid);
             }
         }
@@ -306,12 +385,26 @@ impl Node {
         Ok(id)
     }
 
-    pub fn create_invite(&self, space: Id, expires_in_ms: Option<u64>, max_uses: Option<u32>) -> Result<String> {
+    pub fn create_invite(
+        &self,
+        space: Id,
+        expires_in_ms: Option<u64>,
+        max_uses: Option<u32>,
+    ) -> Result<String> {
         let i = &self.0;
         let inv = iroh::SecretKey::generate();
         let expires = expires_in_ms.map(|ms| id::now_ms().saturating_add(ms));
         let mut st = i.st.lock();
-        author(i, &mut st, space, OpBody::CreateInvite { key: inv.public().into(), expires, max_uses })?;
+        author(
+            i,
+            &mut st,
+            space,
+            OpBody::CreateInvite {
+                key: inv.public().into(),
+                expires,
+                max_uses,
+            },
+        )?;
         let log = &st.spaces[&space];
         let mut peers = vec![i.ep.addr()];
         // add a few online members so the code works while we're offline
@@ -323,7 +416,12 @@ impl Node {
                 peers.push(crate::net::remote_addr(&p.conn));
             }
         }
-        let code = InviteCode { space, space_name: log.state.name.clone(), secret: inv.to_bytes(), peers };
+        let code = InviteCode {
+            space,
+            space_name: log.state.name.clone(),
+            secret: inv.to_bytes(),
+            peers,
+        };
         drop(st);
         i.emit(Event::Changed);
         code.encode()
@@ -331,14 +429,22 @@ impl Node {
 
     // ------------------------------------------------------------------ messages
 
-    pub fn messages(&self, space: Id, channel: Id, before: Option<u64>, limit: usize) -> Result<Vec<api::MessageView>> {
+    pub fn messages(
+        &self,
+        space: Id,
+        channel: Id,
+        before: Option<u64>,
+        limit: usize,
+    ) -> Result<Vec<api::MessageView>> {
         let i = &self.0;
         {
             let st = i.st.lock();
             let log = st.spaces.get(&space).context("halka yok")?;
             ensure!(log.state.can_view(&i.me, &channel), "bu kanalı göremezsin");
         }
-        let page = i.store.page(&space, &channel, before, limit.clamp(1, 200))?;
+        let page = i
+            .store
+            .page(&space, &channel, before, limit.clamp(1, 200))?;
         if before.is_none()
             && let Some(last) = page.last()
         {
@@ -348,26 +454,57 @@ impl Node {
         Ok(page.into_iter().map(msg_view).collect())
     }
 
-    pub fn send_message(&self, space: Id, channel: Id, text: &str, reply_to: Option<Id>) -> Result<Id> {
+    pub fn send_message(
+        &self,
+        space: Id,
+        channel: Id,
+        text: &str,
+        reply_to: Option<Id>,
+    ) -> Result<Id> {
         msg::check_text(text)?;
-        self.author_msg(space, channel, MsgBody::Text { text: text.to_string(), reply_to })
+        self.author_msg(
+            space,
+            channel,
+            MsgBody::Text {
+                text: text.to_string(),
+                reply_to,
+            },
+        )
     }
 
     pub fn edit_message(&self, space: Id, message: Id, text: &str) -> Result<()> {
         msg::check_text(text)?;
         let t = self.0.store.msg_view(&message)?.context("mesaj yok")?;
-        ensure!(t.msg.author == self.0.me, "yalnızca kendi mesajını düzenleyebilirsin");
-        self.author_msg(space, t.msg.channel, MsgBody::Edit { target: message, text: text.to_string() }).map(|_| ())
+        ensure!(
+            t.msg.author == self.0.me,
+            "yalnızca kendi mesajını düzenleyebilirsin"
+        );
+        self.author_msg(
+            space,
+            t.msg.channel,
+            MsgBody::Edit {
+                target: message,
+                text: text.to_string(),
+            },
+        )
+        .map(|_| ())
     }
 
     pub fn delete_message(&self, space: Id, message: Id) -> Result<()> {
         let t = self.0.store.msg_view(&message)?.context("mesaj yok")?;
-        self.author_msg(space, t.msg.channel, MsgBody::Delete { target: message }).map(|_| ())
+        self.author_msg(space, t.msg.channel, MsgBody::Delete { target: message })
+            .map(|_| ())
     }
 
     fn author_msg(&self, space: Id, channel: Id, body: MsgBody) -> Result<Id> {
         let i = &self.0;
-        let m = Msg { space, channel, author: i.me, ts: id::now_ms(), body };
+        let m = Msg {
+            space,
+            channel,
+            author: i.me,
+            ts: id::now_ms(),
+            body,
+        };
         let s = SignedMsg::sign(&i.key, &m)?;
         let id = s.id();
         let mut st = i.st.lock();
@@ -398,14 +535,24 @@ impl Node {
         let engine = match Voice::start(&opts, send) {
             Ok(e) => Some(e),
             Err(e) => {
-                i.notice(true, format!("Ses aygıtı açılamadı: {e:#}. Dinleyici olarak katıldın."));
+                i.notice(
+                    true,
+                    format!("Ses aygıtı açılamadı: {e:#}. Dinleyici olarak katıldın."),
+                );
                 None
             }
         };
         if let Some(e) = &engine {
             e.set_muted(!can_speak);
         }
-        st.voice = Some(MyVoice { space, channel, muted: !can_speak, deafened: false, streaming: false, engine });
+        st.voice = Some(MyVoice {
+            space,
+            channel,
+            muted: !can_speak,
+            deafened: false,
+            streaming: false,
+            engine,
+        });
         crate::net::voice_changed(i, &mut st);
         drop(st);
         i.emit(Event::Changed);
@@ -423,9 +570,18 @@ impl Node {
     pub fn set_muted(&self, muted: bool) -> Result<()> {
         let i = &self.0;
         let mut st = i.st.lock();
-        let (space, channel) = st.voice.as_ref().map(|v| (v.space, v.channel)).context("sesli odada değilsin")?;
+        let (space, channel) = st
+            .voice
+            .as_ref()
+            .map(|v| (v.space, v.channel))
+            .context("sesli odada değilsin")?;
         if !muted {
-            ensure!(st.spaces[&space].state.can_in(&i.me, &channel, Perms::SPEAK), "bu odada konuşma yetkin yok");
+            ensure!(
+                st.spaces[&space]
+                    .state
+                    .can_in(&i.me, &channel, Perms::SPEAK),
+                "bu odada konuşma yetkin yok"
+            );
         }
         let v = st.voice.as_mut().expect("checked");
         v.muted = muted;
@@ -453,13 +609,27 @@ impl Node {
     }
 
     pub fn set_ptt(&self, down: bool) {
-        if let Some(e) = self.0.st.lock().voice.as_ref().and_then(|v| v.engine.as_ref()) {
+        if let Some(e) = self
+            .0
+            .st
+            .lock()
+            .voice
+            .as_ref()
+            .and_then(|v| v.engine.as_ref())
+        {
             e.set_ptt(down);
         }
     }
 
     pub fn set_peer_volume(&self, member: Id, volume: f32) {
-        if let Some(e) = self.0.st.lock().voice.as_ref().and_then(|v| v.engine.as_ref()) {
+        if let Some(e) = self
+            .0
+            .st
+            .lock()
+            .voice
+            .as_ref()
+            .and_then(|v| v.engine.as_ref())
+        {
             e.set_volume(member, volume);
         }
     }
@@ -467,7 +637,12 @@ impl Node {
     pub fn audio_devices(&self) -> api::AudioDevices {
         let (inputs, outputs) = crate::voice::devices();
         let st = self.0.st.lock();
-        api::AudioDevices { inputs, outputs, input: st.settings.input.clone(), output: st.settings.output.clone() }
+        api::AudioDevices {
+            inputs,
+            outputs,
+            input: st.settings.input.clone(),
+            output: st.settings.output.clone(),
+        }
     }
 
     pub fn set_audio_devices(&self, input: Option<String>, output: Option<String>) -> Result<()> {
@@ -476,7 +651,13 @@ impl Node {
         s.output = output;
         self.set_settings(s)?;
         // reopen devices if in a room
-        let cur = self.0.st.lock().voice.as_ref().map(|v| (v.space, v.channel, v.muted, v.deafened));
+        let cur = self
+            .0
+            .st
+            .lock()
+            .voice
+            .as_ref()
+            .map(|v| (v.space, v.channel, v.muted, v.deafened));
         if let Some((sp, ch, muted, deaf)) = cur {
             self.voice_join(sp, ch)?;
             let _ = self.set_muted(muted);
@@ -512,7 +693,12 @@ impl Node {
         let i = &self.0;
         let mut st = i.st.lock();
         let v = st.voice.as_ref().context("önce bir sesli odaya katıl")?;
-        ensure!(st.spaces[&v.space].state.can_in(&i.me, &v.channel, Perms::STREAM), "bu odada yayın yetkin yok");
+        ensure!(
+            st.spaces[&v.space]
+                .state
+                .can_in(&i.me, &v.channel, Perms::STREAM),
+            "bu odada yayın yetkin yok"
+        );
         st.voice.as_mut().expect("checked").streaming = true;
         st.stream_config = None;
         crate::net::voice_changed(i, &mut st);
@@ -524,7 +710,10 @@ impl Node {
     pub fn stream_packet(&self, pkt: Vec<u8>) -> Result<()> {
         ensure!(pkt.len() >= 9 && pkt.len() <= 4 * 1024 * 1024, "bad packet");
         let mut st = self.0.st.lock();
-        ensure!(st.voice.as_ref().is_some_and(|v| v.streaming), "yayın yapmıyorsun");
+        ensure!(
+            st.voice.as_ref().is_some_and(|v| v.streaming),
+            "yayın yapmıyorsun"
+        );
         let pkt = Arc::new(pkt);
         let now = std::time::Instant::now();
         if pkt[0] == 0 {
@@ -564,10 +753,19 @@ impl Node {
         let i = &self.0;
         let mut st = i.st.lock();
         let v = st.voice.as_ref().context("önce sesli odaya katıl")?;
-        let p = st.presence.get(&(v.space, member)).context("bu kişi odada değil")?;
-        ensure!(p.channel == v.channel && p.streaming, "bu kişi şu an yayın yapmıyor");
+        let p = st
+            .presence
+            .get(&(v.space, member))
+            .context("bu kişi odada değil")?;
+        ensure!(
+            p.channel == v.channel && p.streaming,
+            "bu kişi şu an yayın yapmıyor"
+        );
         let peer = st.peers.get(&member).context("bu kişiye bağlı değilsin")?;
-        peer.tx.try_send(Frame::Watch { on: true }).ok().context("bağlantı meşgul")?;
+        peer.tx
+            .try_send(Frame::Watch { on: true })
+            .ok()
+            .context("bağlantı meşgul")?;
         st.watching.insert(member, (sink, Arc::new(0.into())));
         Ok(())
     }
@@ -601,7 +799,10 @@ pub(crate) fn author(i: &Inner, st: &mut St, space: Id, body: OpBody) -> Result<
     let s: SignedOp = log.author(&i.key, body)?;
     let id = s.id();
     i.store.put_ops(&space, std::slice::from_ref(&s))?;
-    crate::net::broadcast(st, space, None, || Frame::Ops { space, ops: vec![s.clone()] });
+    crate::net::broadcast(st, space, None, || Frame::Ops {
+        space,
+        ops: vec![s.clone()],
+    });
     Ok(id)
 }
 
@@ -655,12 +856,20 @@ pub(crate) fn msg_view(m: StoredMsg) -> api::MessageView {
 fn space_view(i: &Inner, st: &St, log: &SpaceLog) -> api::SpaceView {
     let s = &log.state;
     let me = i.me;
-    let mut channels: Vec<_> = s.channels.iter().filter(|(cid, _)| s.can_view(&me, cid)).collect();
+    let mut channels: Vec<_> = s
+        .channels
+        .iter()
+        .filter(|(cid, _)| s.can_view(&me, cid))
+        .collect();
     channels.sort_by_key(|(_, c)| c.order);
     let in_voice = |cid: &Id| -> (Vec<Id>, Vec<Id>) {
         let mut voice = Vec::new();
         let mut streams = Vec::new();
-        if let Some(v) = st.voice.as_ref().filter(|v| v.space == s.id && v.channel == *cid) {
+        if let Some(v) = st
+            .voice
+            .as_ref()
+            .filter(|v| v.space == s.id && v.channel == *cid)
+        {
             voice.push(me);
             if v.streaming {
                 streams.push(me);
@@ -681,22 +890,39 @@ fn space_view(i: &Inner, st: &St, log: &SpaceLog) -> api::SpaceView {
     let channels = channels
         .into_iter()
         .map(|(cid, c)| {
-            let (voice, streams) = if c.kind == ChannelKind::Voice { in_voice(cid) } else { (vec![], vec![]) };
+            let (voice, streams) = if c.kind == ChannelKind::Voice {
+                in_voice(cid)
+            } else {
+                (vec![], vec![])
+            };
             api::ChannelView {
                 id: *cid,
                 name: c.name.clone(),
                 kind: c.kind,
-                private_roles: c.private_roles.as_ref().map(|r| r.iter().copied().collect()),
+                private_roles: c
+                    .private_roles
+                    .as_ref()
+                    .map(|r| r.iter().copied().collect()),
                 voice,
                 streams,
-                unread: if c.kind == ChannelKind::Text { i.store.unread(&s.id, cid, &me).unwrap_or(0) } else { 0 },
+                unread: if c.kind == ChannelKind::Text {
+                    i.store.unread(&s.id, cid, &me).unwrap_or(0)
+                } else {
+                    0
+                },
             }
         })
         .collect();
     let mut roles: Vec<api::RoleView> = s
         .roles
         .iter()
-        .map(|(id, r)| api::RoleView { id: *id, name: r.name.clone(), color: r.color, perms: r.perms.names(), rank: r.rank })
+        .map(|(id, r)| api::RoleView {
+            id: *id,
+            name: r.name.clone(),
+            color: r.color,
+            perms: r.perms.names(),
+            rank: r.rank,
+        })
         .collect();
     roles.sort_by_key(|r| std::cmp::Reverse(r.rank));
     let members = s
@@ -712,12 +938,15 @@ fn space_view(i: &Inner, st: &St, log: &SpaceLog) -> api::SpaceView {
                 (false, ConnKind::None, None)
             };
             let voice = if *m == me {
-                st.voice.as_ref().filter(|v| v.space == s.id).map(|v| api::VoiceState {
-                    channel: v.channel,
-                    muted: v.muted,
-                    deafened: v.deafened,
-                    streaming: v.streaming,
-                })
+                st.voice
+                    .as_ref()
+                    .filter(|v| v.space == s.id)
+                    .map(|v| api::VoiceState {
+                        channel: v.channel,
+                        muted: v.muted,
+                        deafened: v.deafened,
+                        streaming: v.streaming,
+                    })
             } else if online {
                 st.presence.get(&(s.id, *m)).map(|p| api::VoiceState {
                     channel: p.channel,
@@ -752,7 +981,13 @@ fn space_view(i: &Inner, st: &St, log: &SpaceLog) -> api::SpaceView {
         invites: s
             .invites
             .iter()
-            .map(|(k, v)| api::InviteView { id: *k, created_by: v.created_by, expires: v.expires, max_uses: v.max_uses, uses: v.uses })
+            .map(|(k, v)| api::InviteView {
+                id: *k,
+                created_by: v.created_by,
+                expires: v.expires,
+                max_uses: v.max_uses,
+                uses: v.uses,
+            })
             .collect(),
     }
 }

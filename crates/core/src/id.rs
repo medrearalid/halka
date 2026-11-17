@@ -51,7 +51,11 @@ impl fmt::Display for Id {
 
 impl Serialize for Id {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        if s.is_human_readable() { s.serialize_str(&self.hex()) } else { s.serialize_bytes(&self.0) }
+        if s.is_human_readable() {
+            s.serialize_str(&self.hex())
+        } else {
+            s.serialize_bytes(&self.0)
+        }
     }
 }
 
@@ -63,7 +67,9 @@ impl<'de> Deserialize<'de> for Id {
             Id::parse(&s).map_err(D::Error::custom)
         } else {
             let b: &[u8] = serde_bytes_slice(d)?;
-            Ok(Id(b.try_into().map_err(|_| D::Error::custom("id must be 32 bytes"))?))
+            Ok(Id(b
+                .try_into()
+                .map_err(|_| D::Error::custom("id must be 32 bytes"))?))
         }
     }
 }
@@ -102,7 +108,9 @@ impl<'de> Deserialize<'de> for Sig {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         use serde::de::Error;
         let b = serde_bytes_slice(d)?;
-        Ok(Sig(b.try_into().map_err(|_| D::Error::custom("sig must be 64 bytes"))?))
+        Ok(Sig(b
+            .try_into()
+            .map_err(|_| D::Error::custom("sig must be 64 bytes"))?))
     }
 }
 
@@ -112,7 +120,8 @@ pub fn sign(key: &iroh::SecretKey, domain: &str, msg: &[u8]) -> Sig {
 
 pub fn verify(author: &Id, domain: &str, msg: &[u8], sig: &Sig) -> bool {
     let Ok(pk) = author.key() else { return false };
-    pk.verify(&domained(domain, msg), &iroh::Signature::from_bytes(&sig.0)).is_ok()
+    pk.verify(&domained(domain, msg), &iroh::Signature::from_bytes(&sig.0))
+        .is_ok()
 }
 
 // Domain separation so a signature for one purpose can never be replayed as another.

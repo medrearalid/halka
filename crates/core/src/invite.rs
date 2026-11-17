@@ -21,14 +21,21 @@ pub struct InviteCode {
 impl InviteCode {
     pub fn encode(&self) -> Result<String> {
         let b = postcard::to_stdvec(self)?;
-        Ok(format!("{PREFIX}{}", data_encoding::BASE32_NOPAD.encode(&b).to_lowercase()))
+        Ok(format!(
+            "{PREFIX}{}",
+            data_encoding::BASE32_NOPAD.encode(&b).to_lowercase()
+        ))
     }
 
     pub fn decode(s: &str) -> Result<InviteCode> {
         let s: String = s.chars().filter(|c| !c.is_whitespace()).collect();
         ensure!(s.len() <= MAX_CODE, "davet kodu çok uzun");
-        let body = s.strip_prefix(PREFIX).context("bu bir Halka davet kodu değil")?;
-        let b = data_encoding::BASE32_NOPAD.decode(body.to_uppercase().as_bytes()).context("davet kodu bozuk")?;
+        let body = s
+            .strip_prefix(PREFIX)
+            .context("bu bir Halka davet kodu değil")?;
+        let b = data_encoding::BASE32_NOPAD
+            .decode(body.to_uppercase().as_bytes())
+            .context("davet kodu bozuk")?;
         let c: InviteCode = postcard::from_bytes(&b).context("davet kodu bozuk")?;
         ensure!(c.peers.len() <= 8, "davet kodu bozuk");
         Ok(c)
@@ -46,7 +53,12 @@ mod tests {
     #[test]
     fn roundtrip() {
         let k = iroh::SecretKey::generate();
-        let c = InviteCode { space: Id([7; 32]), space_name: "x".into(), secret: k.to_bytes(), peers: vec![iroh::EndpointAddr::new(k.public())] };
+        let c = InviteCode {
+            space: Id([7; 32]),
+            space_name: "x".into(),
+            secret: k.to_bytes(),
+            peers: vec![iroh::EndpointAddr::new(k.public())],
+        };
         let s = c.encode().unwrap();
         let d = InviteCode::decode(&format!(" {s}\n")).unwrap();
         assert_eq!(d.space, c.space);

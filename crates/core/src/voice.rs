@@ -86,21 +86,39 @@ impl Drop for Voice {
 
 fn find_device(host: &cpal::Host, name: &Option<String>, input: bool) -> Result<cpal::Device> {
     if let Some(n) = name {
-        let mut devs = if input { host.input_devices()? } else { host.output_devices()? };
+        let mut devs = if input {
+            host.input_devices()?
+        } else {
+            host.output_devices()?
+        };
         if let Some(d) = devs.find(|d| d.description().map(|x| x.name() == n).unwrap_or(false)) {
             return Ok(d);
         }
         tracing::warn!("audio device {n:?} not found, using default");
     }
-    let d = if input { host.default_input_device() } else { host.default_output_device() };
-    d.context(if input { "mikrofon bulunamadı" } else { "hoparlör bulunamadı" })
+    let d = if input {
+        host.default_input_device()
+    } else {
+        host.default_output_device()
+    };
+    d.context(if input {
+        "mikrofon bulunamadı"
+    } else {
+        "hoparlör bulunamadı"
+    })
 }
 
 pub fn devices() -> (Vec<String>, Vec<String>) {
     let host = cpal::default_host();
     let name = |d: cpal::Device| d.description().ok().map(|x| x.name().to_string());
-    let inputs = host.input_devices().map(|it| it.filter_map(name).collect()).unwrap_or_default();
-    let outputs = host.output_devices().map(|it| it.filter_map(name).collect()).unwrap_or_default();
+    let inputs = host
+        .input_devices()
+        .map(|it| it.filter_map(name).collect())
+        .unwrap_or_default();
+    let outputs = host
+        .output_devices()
+        .map(|it| it.filter_map(name).collect())
+        .unwrap_or_default();
     (inputs, outputs)
 }
 
@@ -113,7 +131,11 @@ struct Resampler {
 
 impl Resampler {
     fn new(from: u32, to: u32) -> Self {
-        Resampler { step: from as f64 / to as f64, pos: 0.0, prev: 0.0 }
+        Resampler {
+            step: from as f64 / to as f64,
+            pos: 0.0,
+            prev: 0.0,
+        }
     }
     /// Feed input samples; emits output samples.
     fn push(&mut self, input: &[f32], mut out: impl FnMut(f32)) {
@@ -185,7 +207,12 @@ impl Voice {
         };
         let err = |e| tracing::warn!("audio stream error: {e}");
         let input = match icfg.sample_format() {
-            cpal::SampleFormat::F32 => idev.build_input_stream(icfg.config(), move |d: &[f32], _: &_| on_input(d), err, None)?,
+            cpal::SampleFormat::F32 => idev.build_input_stream(
+                icfg.config(),
+                move |d: &[f32], _: &_| on_input(d),
+                err,
+                None,
+            )?,
             cpal::SampleFormat::I16 => {
                 let mut buf = Vec::new();
                 idev.build_input_stream(
@@ -216,7 +243,10 @@ impl Voice {
             if pending.len() < frames {
                 mixbuf.clear();
                 mix(&sh_out, need48, &mut mixbuf, &mut ref_tx);
-                let (mut l, mut r) = (Vec::with_capacity(frames + 4), Vec::with_capacity(frames + 4));
+                let (mut l, mut r) = (
+                    Vec::with_capacity(frames + 4),
+                    Vec::with_capacity(frames + 4),
+                );
                 let left: Vec<f32> = mixbuf.chunks(2).map(|c| c[0]).collect();
                 let right: Vec<f32> = mixbuf.chunks(2).map(|c| c[1]).collect();
                 rs_l.push(&left, |s| l.push(s));
@@ -237,7 +267,12 @@ impl Voice {
             pending.truncate(frames * 4);
         };
         let output = match ocfg.sample_format() {
-            cpal::SampleFormat::F32 => odev.build_output_stream(ocfg.config(), move |d: &mut [f32], _: &_| on_output(d), err, None)?,
+            cpal::SampleFormat::F32 => odev.build_output_stream(
+                ocfg.config(),
+                move |d: &mut [f32], _: &_| on_output(d),
+                err,
+                None,
+            )?,
             cpal::SampleFormat::I16 => {
                 let mut buf = Vec::new();
                 odev.build_output_stream(
@@ -264,7 +299,11 @@ impl Voice {
 
         input.play()?;
         output.play()?;
-        Ok(Voice { sh, _input: input, _output: output })
+        Ok(Voice {
+            sh,
+            _input: input,
+            _output: output,
+        })
     }
 
     pub fn set_muted(&self, v: bool) {
@@ -278,7 +317,9 @@ impl Voice {
     }
     pub fn apply(&self, o: &VoiceOptions) {
         self.sh.push_to_talk.store(o.push_to_talk, Relaxed);
-        self.sh.vad_threshold.store(o.vad_threshold.to_bits(), Relaxed);
+        self.sh
+            .vad_threshold
+            .store(o.vad_threshold.to_bits(), Relaxed);
         self.sh.ns.store(o.noise_suppression, Relaxed);
         self.sh.aec.store(o.echo_cancellation, Relaxed);
     }
@@ -304,25 +345,50 @@ impl Voice {
         let m = self.sh.mixer.lock();
         let mut v: Vec<(Id, f32)> = m.peers.iter().map(|(id, p)| (*id, p.level)).collect();
         let tx = self.sh.transmitting.load(Relaxed);
-        v.push((me, if tx { f32::from_bits(self.sh.self_level.load(Relaxed)) } else { 0.0 }));
+        v.push((
+            me,
+            if tx {
+                f32::from_bits(self.sh.self_level.load(Relaxed))
+            } else {
+                0.0
+            },
+        ));
         v
     }
 
     /// Incoming voice datagram from `peer` (already authorized by the node).
     pub fn receive(&self, peer: Id, dg: &[u8]) {
+        receive_into(&self.sh, peer, dg)
+    }
+}
+
+fn receive_into(sh: &Shared, peer: Id, dg: &[u8]) {
+    {
         if dg.len() < 4 || dg[0] != DG_VOICE {
             return;
         }
         let seq = u16::from_le_bytes([dg[1], dg[2]]);
         let pkt = &dg[3..];
-        let mut m = self.sh.mixer.lock();
-        let Some(&pan) = m.pans.get(&peer) else { return };
+        let mut m = sh.mixer.lock();
+        let Some(&pan) = m.pans.get(&peer) else {
+            return;
+        };
         let volume = m.volumes.get(&peer).copied().unwrap_or(1.0);
         let p = match m.peers.entry(peer) {
             std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
             std::collections::hash_map::Entry::Vacant(v) => {
-                let Ok(dec) = opus::Decoder::new(RATE, opus::Channels::Mono) else { return };
-                v.insert(Peer { dec, queue: VecDeque::new(), last_seq: None, primed: false, volume, pan, level: 0.0 })
+                let Ok(dec) = opus::Decoder::new(RATE, opus::Channels::Mono) else {
+                    return;
+                };
+                v.insert(Peer {
+                    dec,
+                    queue: VecDeque::new(),
+                    last_seq: None,
+                    primed: false,
+                    volume,
+                    pan,
+                    level: 0.0,
+                })
             }
         };
         let mut pcm = [0f32; FRAME20 * 3];
@@ -383,7 +449,11 @@ fn mix(sh: &Shared, frames: usize, out: &mut Vec<f32>, reference: &mut impl Prod
                 mono[i] += s * p.volume;
             }
             let lvl = level_of(&[(energy / frames as f32).sqrt()]);
-            p.level = if lvl > p.level { lvl } else { p.level * 0.85 + lvl * 0.15 };
+            p.level = if lvl > p.level {
+                lvl
+            } else {
+                p.level * 0.85 + lvl * 0.15
+            };
         }
     }
     for s in out.iter_mut() {
@@ -402,7 +472,12 @@ fn mix(sh: &Shared, frames: usize, out: &mut Vec<f32>, reference: &mut impl Prod
     }
 }
 
-fn process(sh: Arc<Shared>, mut cap: impl Consumer<Item = f32>, mut reference: impl Consumer<Item = f32>, send: SendFn) {
+fn process(
+    sh: Arc<Shared>,
+    mut cap: impl Consumer<Item = f32>,
+    mut reference: impl Consumer<Item = f32>,
+    send: SendFn,
+) {
     let (mut ns, mut aec) = (sh.ns.load(Relaxed), sh.aec.load(Relaxed));
     let mut apm = sonora::AudioProcessing::builder()
         .config(apm_config(ns, aec))
@@ -486,6 +561,53 @@ mod tests {
         let mut n = 0;
         r.push(&vec![0.5; 44_100], |_| n += 1);
         assert!((n as i32 - 48_000).abs() < 3, "{n}");
+    }
+
+    fn shared() -> Shared {
+        Shared {
+            running: AtomicBool::new(true),
+            muted: AtomicBool::new(false),
+            deafened: AtomicBool::new(false),
+            ptt_down: AtomicBool::new(false),
+            push_to_talk: AtomicBool::new(false),
+            vad_threshold: AtomicU32::new(0),
+            ns: AtomicBool::new(true),
+            aec: AtomicBool::new(true),
+            self_level: AtomicU32::new(0),
+            transmitting: AtomicBool::new(false),
+            mixer: Mutex::new(Mixer::default()),
+        }
+    }
+
+    #[test]
+    fn decode_jitter_and_pan() {
+        let sh = shared();
+        let peer = Id([9; 32]);
+        sh.mixer.lock().pans.insert(peer, 1.0); // hard right
+        let mut enc =
+            opus::Encoder::new(RATE, opus::Channels::Mono, opus::Application::Voip).unwrap();
+        let sine: Vec<f32> = (0..FRAME20)
+            .map(|i| (i as f32 * 0.06).sin() * 0.5)
+            .collect();
+        for seq in 0u16..6 {
+            if seq == 3 {
+                continue; // lost packet: must be concealed, not a hole
+            }
+            let mut dg = vec![DG_VOICE];
+            dg.extend_from_slice(&seq.to_le_bytes());
+            dg.extend(enc.encode_vec_float(&sine, 1000).unwrap());
+            receive_into(&sh, peer, &dg);
+        }
+        receive_into(&sh, peer, &[DG_VOICE, 1, 0, 0xff]); // late duplicate: ignored
+        assert_eq!(sh.mixer.lock().peers[&peer].queue.len(), FRAME20 * 6);
+        let (mut rb_tx, _rb_rx) = HeapRb::<f32>::new(RATE as usize).split();
+        let mut out = Vec::new();
+        mix(&sh, FRAME20 * 4, &mut out, &mut rb_tx);
+        let (l, r): (f32, f32) = out
+            .chunks(2)
+            .fold((0.0, 0.0), |(l, r), c| (l + c[0].abs(), r + c[1].abs()));
+        assert!(r > 10.0 && l < r * 0.01, "panned right: l={l} r={r}");
+        assert!(out.iter().all(|s| s.abs() <= 1.0));
     }
 
     #[test]
