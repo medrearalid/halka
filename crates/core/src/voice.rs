@@ -252,6 +252,13 @@ impl Voice {
             0f32,
             std::f32::consts::TAU * 440.0 / icfg.sample_rate() as f32,
         );
+        // test builds only: "wav:<path>" plays a 16-bit mono WAV (at the device rate) as the mic
+        #[allow(unused_mut)]
+        let mut wav: Option<(Vec<f32>, usize)> = None;
+        #[cfg(feature = "test-tone")]
+        if let Some(path) = opts.input.as_deref().and_then(|i| i.strip_prefix("wav:")) {
+            wav = Some((test_support::load_wav(path, icfg.sample_rate())?, 0));
+        }
         let mut on_input = move |data: &[f32]| {
             mono.clear();
             mono.extend(data.chunks(ich).map(|c| c.iter().sum::<f32>() / ich as f32));
@@ -259,6 +266,12 @@ impl Voice {
                 for s in mono.iter_mut() {
                     *s = phase.sin() * 0.3;
                     phase = (phase + step) % std::f32::consts::TAU;
+                }
+            }
+            if let Some((samples, pos)) = wav.as_mut() {
+                for s in mono.iter_mut() {
+                    *s = samples.get(*pos).copied().unwrap_or(0.0);
+                    *pos += 1;
                 }
             }
             rs.push(&mono, |s| {
@@ -474,6 +487,8 @@ fn receive_into(sh: &Shared, peer: Id, dg: &[u8]) {
         p.last_seq = Some(seq);
         if let Ok(n) = p.dec.decode_float(pkt, &mut pcm, false) {
             p.queue.extend(&pcm[..n]);
+            #[cfg(feature = "test-tone")]
+            test_support::RECORDING.lock().extend_from_slice(&pcm[..n]);
         }
         if p.queue.len() > MAX_QUEUE {
             let drop = p.queue.len() - PRIME;
@@ -613,6 +628,51 @@ fn process(
             seq = seq.wrapping_add(1);
         }
         frame20.clear();
+    }
+}
+
+/// Test-build helpers: WAV in, received audio out.
+#[cfg(feature = "test-tone")]
+pub mod test_support {
+    use parking_lot::Mutex;
+
+    /// Every decoded voice sample (48 kHz mono) received by any engine in this process.
+    pub static RECORDING: Mutex<Vec<f32>> = Mutex::new(Vec::new());
+
+    pub fn load_wav(path: &str, rate: u32) -> anyhow::Result<Vec<f32>> {
+        let b = std::fs::read(path)?;
+        let at = b
+            .windows(4)
+            .position(|w| w == b"data")
+            .ok_or_else(|| anyhow::anyhow!("no data chunk"))?;
+        let file_rate = u32::from_le_bytes(b[24..28].try_into()?);
+        anyhow::ensure!(
+            file_rate == rate && u16::from_le_bytes([b[22], b[23]]) == 1,
+            "need mono {rate} Hz WAV"
+        );
+        Ok(b[at + 8..]
+            .chunks_exact(2)
+            .map(|c| i16::from_le_bytes([c[0], c[1]]) as f32 / 32768.0)
+            .collect())
+    }
+
+    pub fn write_wav(path: &str, samples: &[f32]) -> std::io::Result<()> {
+        let data: Vec<u8> = samples
+            .iter()
+            .flat_map(|s| ((s.clamp(-1.0, 1.0) * 32767.0) as i16).to_le_bytes())
+            .collect();
+        let mut h = Vec::with_capacity(44 + data.len());
+        h.extend_from_slice(b"RIFF");
+        h.extend_from_slice(&(36 + data.len() as u32).to_le_bytes());
+        h.extend_from_slice(b"WAVEfmt ");
+        h.extend_from_slice(&[16, 0, 0, 0, 1, 0, 1, 0]);
+        h.extend_from_slice(&48_000u32.to_le_bytes());
+        h.extend_from_slice(&96_000u32.to_le_bytes());
+        h.extend_from_slice(&[2, 0, 16, 0]);
+        h.extend_from_slice(b"data");
+        h.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        h.extend_from_slice(&data);
+        std::fs::write(path, h)
     }
 }
 

@@ -282,6 +282,10 @@ async fn tone_reaches_peer(relay_only: bool) {
 }
 
 async fn voice_reaches_peer(relay_only: bool, mic: &'static str) -> f32 {
+    voice_reaches_peer_for(relay_only, mic, 0.0).await
+}
+
+async fn voice_reaches_peer_for(relay_only: bool, mic: &'static str, listen_secs: f32) -> f32 {
     let dir = tempfile::tempdir().unwrap();
     let mk = move |name: &'static str| {
         let p = dir.path().join(name);
@@ -295,9 +299,11 @@ async fn voice_reaches_peer(relay_only: bool, mic: &'static str) -> f32 {
             s.vad_threshold = 0.0;
             if name == "ayse" {
                 s.input = Some(mic.into());
-                // a steady sine is exactly what noise suppression is built to remove
-                s.noise_suppression = false;
-                s.echo_cancellation = false;
+                // a steady sine is exactly what noise suppression is built to remove;
+                // anything else runs through the full production pipeline
+                let synthetic_tone = mic == "test-tone";
+                s.noise_suppression = !synthetic_tone;
+                s.echo_cancellation = !synthetic_tone;
             }
             n.set_settings(s).unwrap();
             n.shutdown().await;
@@ -342,6 +348,13 @@ async fn voice_reaches_peer(relay_only: bool, mic: &'static str) -> f32 {
             "relay_only must not go direct"
         );
         eprintln!("relay rtt: {:?} ms", m.rtt_ms);
+    }
+    if listen_secs > 0.0 {
+        // restart a's room so the file plays from the top while b is already listening
+        a.voice_leave();
+        halka_core::voice::test_support::RECORDING.lock().clear();
+        a.voice_join(s, vc).unwrap();
+        tokio::time::sleep(Duration::from_secs_f32(listen_secs)).await;
     }
     let mut best = 0f32;
     for _ in 0..100 {
@@ -400,4 +413,24 @@ async fn audio_tone_direct() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn audio_tone_over_public_relay() {
     tone_reaches_peer(true).await;
+}
+
+/// Machine "listening test": synthesized speech is the mic (full pipeline: AEC, NS, AGC, Opus,
+/// network, jitter buffer); the received audio is written to a WAV for speech recognition.
+/// `HALKA_TEST_WAV=in.wav HALKA_TEST_OUT=out.wav cargo test --test e2e speech -- --ignored`
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore]
+async fn speech_roundtrip_recording() {
+    let input = std::env::var("HALKA_TEST_WAV").expect("HALKA_TEST_WAV");
+    let out = std::env::var("HALKA_TEST_OUT").expect("HALKA_TEST_OUT");
+    let mic: &'static str = Box::leak(format!("wav:{input}").into_boxed_str());
+    let secs = std::fs::metadata(&input).unwrap().len() as f32 / 96_000.0;
+    voice_reaches_peer_for(false, mic, secs + 1.5).await;
+    let rec = std::mem::take(&mut *halka_core::voice::test_support::RECORDING.lock());
+    eprintln!(
+        "recorded {:.1} s of received audio",
+        rec.len() as f32 / 48_000.0
+    );
+    halka_core::voice::test_support::write_wav(&out, &rec).unwrap();
+    assert!(rec.len() > 48_000);
 }

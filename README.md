@@ -115,6 +115,7 @@ noktasından geriye tarihli işlem üretip geri sızmasını engeller. Bunun tes
   - Uçtan uca 3 düğüm: katılma, sohbet, düzenle/sil, atma, ekran paylaşımı.
   - Yeniden başlatma sonrası kalıcılık.
 - **Yankı engelleme:** hoparlörden mikrofona sızan konuşma benzeri sinyalin yaklaşık 50 dB'i siliniyor; AEC kapalıyken bu oran 3 dB.
+- **Makineyle dinleme testi:** Windows TTS ile üretilen konuşma mikrofon girişine verildi ve tam üretim hattından geçti (AEC, gürültü bastırma, AGC, Opus, ağ, jitter buffer). Karşıda kaydedilen ses Whisper ile yazıya döküldü ve gönderilen cümleyle kelimesi kelimesine aynı çıktı: "Hello friends. The quick brown fox jumps over the lazy dog. Can you hear me clearly through the ring?" Tekrarlamak için: `bash tools/speech/run.sh`.
 - **Gerçek mikrofon, ağ üzerinden:** AMD mikrofon dizisinin gerçek oda sesi yakalandı, kodlandı, gönderildi ve karşıda −78 dBFS olarak çözüldü. Kendi mikrofonunla tekrarlamak için: `HALKA_TEST_MIC="<aygıt adı>" cargo test --test e2e real_mic -- --ignored`.
 - **Kurulum:** sessiz kurulum, üzerine kurulum ve kaldırma çalışıyor. Etkileşimli sihirbaz da Hoş geldin → Kur → Bitir adımlarıyla dosyaları, Başlat menüsünü ve kaldırma kaydını oluşturdu; Bitir'e basınca 0 koduyla kapanıp Halka'yı başlattı.
 - **Gerçek ses, ağ üzerinden.** A'nın mikrofonu yerine 440 Hz test tonu verildi; B tonu doğrudan bağlantıda 0,77, yalnızca public relay üzerinden 0,72 seviyesinde duydu. İkinci ölçüm aynı zamanda relay'lere bu makineden (Türkiye) erişimi doğruluyor; gidiş-dönüş süresi yaklaşık 240 ms.
@@ -128,6 +129,6 @@ noktasından geriye tarihli işlem üretip geri sızmasını engeller. Bunun tes
   - ekran paylaşımı: 1920×1080 kareler karşıda çiziliyor, pencere simge durumundayken de yaklaşık 29 fps sürüyor.
 
 **Henüz doğrulanmayanlar**
-- **Bir insanın sesi ve kulakla dinleme.** Bu makinedeki kulaklık mikrofonu test sırasında kapalıydı; ses hattı test tonu ve gerçek oda sesiyle ölçüldü.
-- **İki ayrı evden doğrudan bağlantı (NAT delme).** Doğrudan bağlantı yalnızca aynı makinede, relay yolu ise internet üzerinden test edildi; doğrudan kurulamazsa relay devreye girer.
+- **Bir insanın kendi sesiyle konuşup kulakla dinlemesi.** Konuşmanın hattan anlaşılır geçtiği makine testiyle doğrulandı, kulakla dinlenmedi.
+- **İki ayrı evden doğrudan bağlantı (NAT delme).** Bunun için ikinci bir ağ gerekiyor. WSL/Hyper-V ile sanal bir NAT kurmak yönetici onayı ve yeniden başlatma istediğinden bu gece yapılamadı. Doğrudan bağlantı aynı makinede, relay yolu internet üzerinden test edildi; doğrudan bağlantı kurulamazsa uygulama relay'e geçer.
 - **İlk açılışta Windows Güvenlik Duvarı izni.** Windows izin ister. İzin verilirse doğrudan bağlantı kurulabilir, verilmezse relay kullanılır.
