@@ -30,6 +30,8 @@ Testler:
 ```bash
 cargo test --workspace        # durum makinesi, protokol, ses hattı, uçtan uca 3 düğüm
 cd app && bun test tests       # akış paket formatı, koltuk/pan hesabı
+cargo build --profile fastrel -p halka --features tauri/custom-protocol
+bash tools/e2e/run.sh          # iki gerçek örnek: isim, halka, davet, katılma, sohbet, XSS, ses odası, ekran paylaşımı
 ```
 
 ## Mimari
