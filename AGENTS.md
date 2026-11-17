@@ -7,5 +7,6 @@
 
 - Bu repoda aynı çalışma dizininde birden fazla ajan çalışıyor. Yalnızca kendi değiştirdiğin dosyaları commit'le: `git add <dosya>` ile tek tek ekle; `git add -A`, `git add .` veya `git commit -a` kullanma.
 - Commit mesajının sonuna kimin yaptığını yaz (`Co-Authored-By: ...`).
-- Push etme, tag atma, release çıkarma. Release'e yalnızca proje sahibinin onayladığı commit'ler girer; sürüm yükseltmeyi ve tag'i sahip onaylarsa Claude yapar.
+- Commit, sahibin onayı demektir: yalnızca sahip istediğinde commit'le. Commit'lenen her şey bir sonraki release'e girebilir, commit'lenmemiş hiçbir şey giremez.
+- Push etme, tag atma, release çıkarma; sürüm yükseltme, tag ve push Claude'un işidir.
 - Başka bir ajanın commit'lenmemiş değişikliklerine dokunma; geri alma, stash'leme, yeniden yazma.

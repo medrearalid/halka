@@ -13,4 +13,4 @@ Rules:
 
 Owner, Claude and ChatGPT work in the same checkout; ChatGPT commits its own work. Follow the "Birlikte çalışma" rules in AGENTS.md:
 - Stage only files you changed, by path; never `git add -A`, `git add .` or `git commit -a`. Leave other agents' uncommitted changes alone.
-- Releases (version bump, tag, push) are Claude's job, but only include commits the owner has approved; list the commits since the last tag and ask before tagging.
+- A commit is the owner's approval (ChatGPT commits only when the owner asks). Releases (version bump, tag, push) are Claude's job: everything committed on main may ship, uncommitted work never does. No need to ask before tagging.
