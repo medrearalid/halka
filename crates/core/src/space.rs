@@ -435,10 +435,50 @@ impl State {
     }
 }
 
-fn revocation_target(op: &Op) -> Option<Id> {
+fn removal_target(op: &Op) -> Option<Id> {
     match op.body {
         OpBody::Kick { member } | OpBody::Ban { member, on: true } => Some(member),
         _ => None,
+    }
+}
+
+/// Members whose powers `op` takes away, evaluated against the state right before it applies.
+/// Their ops concurrent with `op` get voided ("revocation wins"), so a demoted admin can't fork
+/// the DAG from before the demotion and keep acting with old rights.
+fn revoked_by(st: &State, op: &Op) -> Vec<Id> {
+    let holders = |role: &Id| -> Vec<Id> {
+        st.members
+            .iter()
+            .filter(|(_, m)| m.roles.contains(role))
+            .map(|(id, _)| *id)
+            .collect()
+    };
+    match &op.body {
+        OpBody::Kick { member } | OpBody::Ban { member, on: true } => vec![*member],
+        OpBody::AssignRole {
+            member,
+            role,
+            on: false,
+        } => st
+            .members
+            .get(member)
+            .filter(|m| m.roles.contains(role))
+            .map(|_| vec![*member])
+            .unwrap_or_default(),
+        OpBody::DeleteRole { role } => holders(role),
+        OpBody::UpdateRole {
+            role, perms, rank, ..
+        } => match st.roles.get(role) {
+            Some(old) if !old.perms.subset_of(*perms) || *rank < old.rank => {
+                if *role == st.id {
+                    st.members.keys().copied().collect()
+                } else {
+                    holders(role)
+                }
+            }
+            _ => vec![],
+        },
+        _ => vec![],
     }
 }
 
@@ -504,12 +544,13 @@ impl SpaceLog {
     /// The state is rebuilt once at the end if anything changed.
     pub fn insert_many(&mut self, ops: impl IntoIterator<Item = SignedOp>) -> Vec<Id> {
         let mut added = Vec::new();
-        for s in ops {
-            if let Ok(e) = s.verify() {
-                let id = e.id;
-                if let Ok(Added::New) = self.insert_entry(e) {
-                    added.push(id);
-                }
+        // parents first: keeps the bounded pending pool for genuinely missing parents only
+        let mut entries: Vec<Entry> = ops.into_iter().filter_map(|s| s.verify().ok()).collect();
+        entries.sort_by_key(|e| e.op.clock);
+        for e in entries {
+            let id = e.id;
+            if let Ok(Added::New) = self.insert_entry(e) {
+                added.push(id);
             }
         }
         self.drain_pending(&mut added);
@@ -582,9 +623,10 @@ impl SpaceLog {
     /// The latest accepted kick/ban of `member` together with all its ancestors: enough for an
     /// ex-member to verify their own removal, without revealing anything that happened after.
     pub fn removal_proof(&self, member: &Id) -> Option<Vec<SignedOp>> {
-        let r = self.order().into_iter().rev().find(|e| {
-            !self.rejected.contains(&e.id) && revocation_target(&e.op) == Some(*member)
-        })?;
+        let r =
+            self.order().into_iter().rev().find(|e| {
+                !self.rejected.contains(&e.id) && removal_target(&e.op) == Some(*member)
+            })?;
         let mut out: Vec<SignedOp> = self
             .reach(r.id, false)
             .iter()
@@ -643,13 +685,12 @@ impl SpaceLog {
             let mut rejected = HashSet::new();
             let mut revocations = Vec::new();
             for e in order.iter().skip(1) {
+                let targets = revoked_by(&st, &e.op);
                 if void.contains(&e.id) || st.apply(e).is_err() {
                     rejected.insert(e.id);
                     continue;
                 }
-                if let Some(t) = revocation_target(&e.op) {
-                    revocations.push((e.id, t));
-                }
+                revocations.extend(targets.into_iter().map(|t| (e.id, t)));
                 accepted.push(e);
             }
             let mut grew = false;
@@ -899,6 +940,59 @@ mod tests {
         log.insert_many([f]);
         assert!(log.rejected.contains(&fid));
         assert!(!log.state.invites.contains_key(&idk(&inv)));
+    }
+
+    #[test]
+    fn demotion_wins_over_backdated_ops() {
+        let (o, b, mut log) = setup();
+        let admin = log
+            .author(
+                &o,
+                OpBody::CreateRole {
+                    name: "adm".into(),
+                    color: 0,
+                    perms: Perms::ADMIN,
+                    rank: 5,
+                },
+            )
+            .unwrap()
+            .id();
+        log.author(
+            &o,
+            OpBody::AssignRole {
+                member: idk(&b),
+                role: admin,
+                on: true,
+            },
+        )
+        .unwrap();
+        let before: Vec<Id> = log.heads.iter().copied().collect();
+        log.author(
+            &o,
+            OpBody::AssignRole {
+                member: idk(&b),
+                role: admin,
+                on: false,
+            },
+        )
+        .unwrap();
+        // b forks from while it was admin and renames the space
+        let f = forge(
+            &log,
+            &b,
+            before,
+            OpBody::RenameSpace {
+                name: "ele gecirildi".into(),
+            },
+        );
+        let fid = f.id();
+        log.insert_many([f]);
+        assert!(log.rejected.contains(&fid));
+        assert_eq!(log.state.name, "test");
+        // deleting a role revokes its holders the same way
+        let mut log2 = SpaceLog::new(log.genesis().clone()).unwrap();
+        log2.insert_many(log.entries().map(|e| e.signed.clone()).collect::<Vec<_>>());
+        assert_eq!(log2.state.name, "test");
     }
 
     #[test]

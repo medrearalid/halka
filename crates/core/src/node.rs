@@ -143,27 +143,18 @@ impl Node {
                 lookup.add_endpoint_info(a);
             }
         }
-        let mut b = Endpoint::builder(presets::N0)
-            .secret_key(key.clone())
-            .alpns(vec![wire::ALPN.to_vec()])
-            .address_lookup(lookup.clone());
-        let relays: Vec<iroh::RelayUrl> = settings
-            .relays
-            .iter()
-            .filter_map(|u| u.parse().ok())
-            .collect();
-        if !relays.is_empty() {
-            b = b.relay_mode(RelayMode::custom(relays));
-        }
-        if settings.relay_only {
-            b = b.clear_ip_transports();
-        } else {
-            // LAN discovery: friends on the same network connect with no internet at all
-            b = b.address_lookup(
-                iroh_mdns_address_lookup::MdnsAddressLookup::builder().service_name("halka"),
-            );
-        }
-        let ep = b.bind().await.context("ağ başlatılamadı")?;
+        let custom = settings.relay_only || !settings.relays.is_empty();
+        let ep = match bind(&key, &lookup, &settings).await {
+            Ok(ep) => ep,
+            // a bad privacy/relay setting must never brick the app: fall back to defaults
+            Err(e) if custom => {
+                tracing::warn!("bind with custom network settings failed: {e:#}");
+                bind(&key, &lookup, &Settings::default())
+                    .await
+                    .context("ağ başlatılamadı")?
+            }
+            Err(e) => return Err(e.context("ağ başlatılamadı")),
+        };
 
         let (tx, rx) = mpsc::unbounded_channel();
         let inner = Arc::new(Inner {
@@ -201,7 +192,15 @@ impl Node {
     }
 
     pub async fn shutdown(&self) {
-        self.0.st.lock().voice = None;
+        {
+            let mut st = self.0.st.lock();
+            st.voice = None;
+            st.mic_test = None;
+            st.peers.clear();
+            st.watchers.clear();
+            st.watching.clear();
+        }
+        self.0.voice_targets.write().clear();
         self.0.ep.close().await;
     }
 
@@ -796,6 +795,34 @@ impl Node {
 }
 
 // ---------------------------------------------------------------------- helpers
+
+async fn bind(
+    key: &iroh::SecretKey,
+    lookup: &MemoryLookup,
+    settings: &Settings,
+) -> Result<Endpoint> {
+    let mut b = Endpoint::builder(presets::N0)
+        .secret_key(key.clone())
+        .alpns(vec![wire::ALPN.to_vec()])
+        .address_lookup(lookup.clone());
+    let relays: Vec<iroh::RelayUrl> = settings
+        .relays
+        .iter()
+        .filter_map(|u| u.parse().ok())
+        .collect();
+    if !relays.is_empty() {
+        b = b.relay_mode(RelayMode::custom(relays));
+    }
+    if settings.relay_only {
+        b = b.clear_ip_transports();
+    } else {
+        // LAN discovery: friends on the same network connect with no internet at all
+        b = b.address_lookup(
+            iroh_mdns_address_lookup::MdnsAddressLookup::builder().service_name("halka"),
+        );
+    }
+    Ok(b.bind().await?)
+}
 
 pub(crate) fn voice_opts(s: &Settings) -> VoiceOptions {
     VoiceOptions {

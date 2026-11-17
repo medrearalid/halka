@@ -78,7 +78,10 @@ pub(crate) fn spawn_background(i: &Arc<Inner>) {
     // online flag
     let o = i.clone();
     tokio::spawn(async move {
-        o.ep.online().await;
+        tokio::select! {
+            _ = o.ep.online() => {}
+            _ = o.ep.closed() => return,
+        }
         o.st.lock().online = true;
         o.emit(Event::Changed);
     });
@@ -89,6 +92,9 @@ pub(crate) fn spawn_background(i: &Arc<Inner>) {
         let mut tick = tokio::time::interval(Duration::from_secs(2));
         loop {
             tick.tick().await;
+            if d.ep.is_closed() {
+                return; // releases Inner (and the database) after shutdown
+            }
             let targets: Vec<Id> = {
                 let st = d.st.lock();
                 let mut t = BTreeSet::new();
@@ -128,6 +134,9 @@ pub(crate) fn spawn_background(i: &Arc<Inner>) {
         let mut n: u64 = 0;
         loop {
             tick.tick().await;
+            if p.ep.is_closed() {
+                return;
+            }
             n += 1;
             let levels = {
                 let st = p.st.lock();

@@ -3,3 +3,5 @@ node_modules/
 dist/
 *.log
 app/src-tauri/gen/
+target-test/
+target-dbg/

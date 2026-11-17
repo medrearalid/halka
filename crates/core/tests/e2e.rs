@@ -219,3 +219,53 @@ async fn screen_share_flows_to_watcher() {
     a.shutdown().await;
     b.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn survives_restart_and_relay_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let (a, b) = (node(&dir, "ayse").await, node(&dir, "berk").await);
+    let s = a.create_space("Kalici").unwrap();
+    let ch = text_channel(&a, s);
+    b.join_space(&a.create_invite(s, None, None).unwrap())
+        .await
+        .unwrap();
+    a.send_message(s, ch, "unutma beni", None).unwrap();
+    until("b got it", || {
+        b.messages(s, ch, None, 10).unwrap().len() == 1
+    })
+    .await;
+    let (aid, bid) = (a.id(), b.id());
+    // b turns on relay-only (exercises the privacy path on restart)
+    let mut set = b.settings();
+    set.relay_only = true;
+    b.set_settings(set).unwrap();
+    a.shutdown().await;
+    b.shutdown().await;
+    drop((a, b));
+
+    // background tasks notice the closed endpoint within a tick and release the database
+    async fn restart(p: std::path::PathBuf) -> Node {
+        for _ in 0..50 {
+            if let Ok((n, mut rx)) = Node::start(&p).await {
+                tokio::spawn(async move { while rx.recv().await.is_some() {} });
+                return n;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+        panic!("database never released");
+    }
+    let a = restart(dir.path().join("ayse")).await;
+    let b = restart(dir.path().join("berk")).await;
+    assert_eq!((a.id(), b.id()), (aid, bid), "identity survives");
+    assert!(b.settings().relay_only);
+    assert_eq!(b.snapshot().me.name, "berk");
+    assert_eq!(b.messages(s, ch, None, 10).unwrap()[0].text, "unutma beni");
+    // peers find each other again from persisted addresses and keep chatting
+    b.send_message(s, ch, "geri geldim", None).unwrap();
+    until("a gets post-restart message", || {
+        a.messages(s, ch, None, 10).unwrap().len() == 2
+    })
+    .await;
+    a.shutdown().await;
+    b.shutdown().await;
+}
