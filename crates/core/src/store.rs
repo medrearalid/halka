@@ -118,7 +118,28 @@ impl Store {
     }
 
     pub fn delete_space(&self, space: &Id) -> Result<()> {
+        // collect this space's message ids first so every index is purged (privacy on leave/kick)
+        let ids: Vec<[u8; 32]> = {
+            let r = self.db.begin_read()?;
+            let t = r.open_table(MSG_SYNC)?;
+            let start = space.0.to_vec();
+            let end = prefix_end(&start);
+            let mut v = Vec::new();
+            for kv in t.range(start.as_slice()..end.as_slice())? {
+                v.push(kv?.0.value()[72..104].try_into()?);
+            }
+            v
+        };
         let w = self.db.begin_write()?;
+        {
+            let (mut idx, mut loc, mut extra) = (w.open_table(MSG_IDX)?, w.open_table(MSG_LOC)?, w.open_table(MSG_EXTRA)?);
+            for id in &ids {
+                idx.remove(id)?;
+                loc.remove(id)?;
+                let s = id.to_vec();
+                extra.retain_in(s.as_slice()..prefix_end(&s).as_slice(), |_, _| false)?;
+            }
+        }
         {
             let start = space.0.to_vec();
             let end = prefix_end(&start);

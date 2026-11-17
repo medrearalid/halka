@@ -70,3 +70,49 @@ async fn space_lifecycle() {
         n.shutdown().await;
     }
 }
+
+fn voice_channel(n: &Node, s: Id) -> Id {
+    n.snapshot().spaces.iter().find(|x| x.id == s).unwrap().channels.iter().find(|c| c.kind == ChannelKind::Voice).unwrap().id
+}
+
+fn pkt(kind: u8, ts: u64, body: &[u8]) -> Vec<u8> {
+    let mut v = vec![kind];
+    v.extend_from_slice(&ts.to_le_bytes());
+    v.extend_from_slice(body);
+    v
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn screen_share_flows_to_watcher() {
+    let dir = tempfile::tempdir().unwrap();
+    let (a, b) = (node(&dir, "ayse").await, node(&dir, "berk").await);
+    let s = a.create_space("Yayin").unwrap();
+    let code = a.create_invite(s, None, None).unwrap();
+    b.join_space(&code).await.unwrap();
+    let vc = voice_channel(&a, s);
+    a.voice_join(s, vc).unwrap();
+    b.voice_join(s, vc).unwrap();
+    until("both in room", || a.snapshot().spaces[0].channels.iter().any(|c| c.id == vc && c.voice.len() == 2)).await;
+
+    a.stream_start().unwrap();
+    until("b sees stream", || b.snapshot().spaces[0].channels.iter().any(|c| c.id == vc && c.streams == vec![a.id()])).await;
+    let got = std::sync::Arc::new(parking_lot::Mutex::new(Vec::<Vec<u8>>::new()));
+    let g = got.clone();
+    b.watch(a.id(), std::sync::Arc::new(move |p| g.lock().push(p))).unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    a.stream_packet(pkt(0, 0, br#"{"codec":"vp8","width":2,"height":2}"#)).unwrap();
+    a.stream_packet(pkt(2, 1, b"orphan-delta")).unwrap(); // before any key frame: must be skipped
+    a.stream_packet(pkt(1, 2, b"key")).unwrap();
+    a.stream_packet(pkt(2, 3, b"d1")).unwrap();
+    a.stream_packet(pkt(1, 4, &vec![7u8; 300_000])).unwrap(); // big key frame, new GOP
+    for _ in 0..100 { if got.lock().len() >= 5 { break } tokio::time::sleep(Duration::from_millis(100)).await; }
+    eprintln!("got kinds: {:?}", got.lock().iter().map(|p| p[0]).collect::<Vec<_>>());
+    let kinds: Vec<u8> = got.lock().iter().map(|p| p[0]).collect();
+    assert_eq!(kinds, vec![0, 1, 2, 0, 1], "config+key+delta, then config+key of next GOP");
+    assert_eq!(got.lock()[4].len(), 9 + 300_000);
+
+    a.stream_stop();
+    until("stream gone", || b.snapshot().spaces[0].channels.iter().all(|c| c.streams.is_empty())).await;
+    a.shutdown().await;
+    b.shutdown().await;
+}

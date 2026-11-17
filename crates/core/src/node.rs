@@ -80,6 +80,7 @@ pub(crate) struct Inner {
     pub st: Mutex<St>,
     /// Connections that should receive our voice datagrams.
     pub voice_targets: RwLock<Vec<Connection>>,
+    pub last_keyframe: Mutex<std::time::Instant>,
 }
 
 #[derive(Clone)]
@@ -87,6 +88,14 @@ pub struct Node(pub(crate) Arc<Inner>);
 
 impl Inner {
     pub fn emit(&self, e: Event) {
+        if matches!(e, Event::StreamKeyframe) {
+            // watchers can ask for key frames; never let them turn the encoder into all-intra
+            let mut last = self.last_keyframe.lock();
+            if last.elapsed() < std::time::Duration::from_millis(700) {
+                return;
+            }
+            *last = std::time::Instant::now();
+        }
         let _ = self.ev.send(e);
     }
     pub fn notice(&self, error: bool, text: impl Into<String>) {
@@ -153,6 +162,7 @@ impl Node {
                 online: false,
             }),
             voice_targets: RwLock::new(Vec::new()),
+            last_keyframe: Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(5)),
         });
         crate::net::spawn_background(&inner);
         Ok((Node(inner), rx))
@@ -523,7 +533,7 @@ impl Node {
         let key = pkt[0] == 1;
         let mut want_key = false;
         for w in st.watchers.values_mut() {
-            if w.skipping && !key {
+            if w.skipping && !key && pkt[0] != 0 {
                 continue;
             }
             match w.tx.try_send((now, pkt.clone())) {

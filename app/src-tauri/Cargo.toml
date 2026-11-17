@@ -1,0 +1,22 @@
+[package]
+name = "halka"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[lib]
+name = "halka_lib"
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+halka-core = { path = "../../crates/core" }
+tauri = { version = "2", features = ["tray-icon"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["time", "sync"] }
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

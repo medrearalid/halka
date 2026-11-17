@@ -54,10 +54,16 @@ pub(crate) fn spawn_background(i: &Arc<Inner>) {
     // accept loop
     let a = i.clone();
     tokio::spawn(async move {
+        // bound concurrent handshakes so strangers can't exhaust us with half-open connections
+        let gate = Arc::new(tokio::sync::Semaphore::new(32));
         while let Some(inc) = a.ep.accept().await {
+            let Ok(permit) = gate.clone().try_acquire_owned() else {
+                inc.refuse();
+                continue;
+            };
             let a = a.clone();
             tokio::spawn(async move {
-                if let Err(e) = accept(a, inc).await {
+                if let Err(e) = accept(a, inc, permit).await {
                     tracing::debug!("incoming rejected: {e:#}");
                 }
             });
@@ -173,7 +179,7 @@ pub(crate) async fn dial(i: &Arc<Inner>, m: Id, join: Option<wire::JoinReq>) -> 
     Ok(())
 }
 
-async fn accept(i: Arc<Inner>, inc: iroh::endpoint::Incoming) -> Result<()> {
+async fn accept(i: Arc<Inner>, inc: iroh::endpoint::Incoming, permit: tokio::sync::OwnedSemaphorePermit) -> Result<()> {
     let conn = tokio::time::timeout(Duration::from_secs(10), inc).await??;
     let remote: Id = conn.remote_id().into();
     ensure!(remote != i.me, "self");
@@ -210,6 +216,7 @@ async fn accept(i: Arc<Inner>, inc: iroh::endpoint::Incoming) -> Result<()> {
         bail!("{remote:?} shares no space with us");
     }
     wire::write_frame(&mut send, &Frame::Welcome { spaces: allowed.clone() }).await?;
+    drop(permit);
     run_peer(i, conn, send, recv, allowed.into_iter().collect(), joining, false).await;
     Ok(())
 }
@@ -325,6 +332,8 @@ async fn write_loop(mut send: SendStream, mut rx: mpsc::Receiver<Frame>) {
 async fn read_loop(i: &Arc<Inner>, conn: &Connection, mut recv: RecvStream, remote: Id) -> Result<()> {
     let mut frames = Rate::new(400.0, 2000.0);
     let mut bytes = Rate::new(4.0 * 1024.0 * 1024.0, 16.0 * 1024.0 * 1024.0);
+    // each ops frame triggers a replay; bound how hard one peer can make us work
+    let mut op_frames = Rate::new(20.0, 200.0);
     let join_deadline = Instant::now() + Duration::from_secs(60);
     loop {
         let f = tokio::select! {
@@ -334,6 +343,9 @@ async fn read_loop(i: &Arc<Inner>, conn: &Connection, mut recv: RecvStream, remo
         let Some(f) = f else { return Ok(()) };
         let size = postcard::experimental::serialized_size(&f).unwrap_or(0) as f64;
         ensure!(frames.allow(1.0) && bytes.allow(size), "rate limit exceeded");
+        if matches!(f, Frame::Ops { .. }) {
+            ensure!(op_frames.allow(1.0), "op rate limit exceeded");
+        }
         let joining = i.st.lock().peers.get(&remote).is_some_and(|p| p.joining.is_some());
         if joining {
             ensure!(Instant::now() < join_deadline, "join took too long");
@@ -426,7 +438,9 @@ fn handle(i: &Arc<Inner>, remote: Id, f: Frame) -> Result<()> {
     match f {
         Frame::Hello { .. } | Frame::Welcome { .. } => bail!("unexpected handshake frame"),
         Frame::OpSummary { space, buckets } => {
-            ensure!(peer_has(&st, &remote, &space), "space not shared");
+            if !peer_has(&st, &remote, &space) {
+                return Ok(());
+            }
             let ours = op_items(&st, &space);
             let mine = wire::summarize(ours.iter().copied(), OP_BUCKET);
             for b in wire::diff(&mine, &buckets) {
@@ -435,7 +449,10 @@ fn handle(i: &Arc<Inner>, remote: Id, f: Frame) -> Result<()> {
             }
         }
         Frame::OpIds { space, bucket, ids } => {
-            ensure!(peer_has(&st, &remote, &space) && ids.len() <= 100_000, "bad op ids");
+            ensure!(ids.len() <= 100_000, "bad op ids");
+            if !peer_has(&st, &remote, &space) {
+                return Ok(());
+            }
             let theirs: BTreeSet<Id> = ids.into_iter().collect();
             let log = st.spaces.get(&space).context("space")?;
             let missing: Vec<SignedOp> =
@@ -443,18 +460,24 @@ fn handle(i: &Arc<Inner>, remote: Id, f: Frame) -> Result<()> {
             send_ops(&st, remote, space, missing);
         }
         Frame::WantOps { space, ids } => {
-            ensure!(peer_has(&st, &remote, &space), "space not shared");
+            if !peer_has(&st, &remote, &space) {
+                return Ok(());
+            }
             let log = st.spaces.get(&space).context("space")?;
             let ops: Vec<SignedOp> = ids.iter().take(4096).filter_map(|id| log.get(id)).map(|e| e.signed.clone()).collect();
             send_ops(&st, remote, space, ops);
         }
         Frame::Ops { space, ops } => {
-            ensure!(peer_has(&st, &remote, &space), "space not shared");
+            if !peer_has(&st, &remote, &space) {
+                return Ok(());
+            }
             ensure!(ops.len() <= MAX_OPS_PER_FRAME, "too many ops");
             ingest_ops(i, &mut st, remote, space, ops)?;
         }
         Frame::MsgSummary { space, channel, buckets } => {
-            ensure!(peer_has(&st, &remote, &space), "space not shared");
+            if !peer_has(&st, &remote, &space) {
+                return Ok(());
+            }
             if !shared_channels(i, &st, &space, &remote).contains(&channel) {
                 return Ok(());
             }
@@ -466,7 +489,10 @@ fn handle(i: &Arc<Inner>, remote: Id, f: Frame) -> Result<()> {
             }
         }
         Frame::MsgIds { space, channel, bucket, ids } => {
-            ensure!(peer_has(&st, &remote, &space) && ids.len() <= 100_000, "bad msg ids");
+            ensure!(ids.len() <= 100_000, "bad msg ids");
+            if !peer_has(&st, &remote, &space) {
+                return Ok(());
+            }
             if !shared_channels(i, &st, &space, &remote).contains(&channel) {
                 return Ok(());
             }
@@ -480,7 +506,10 @@ fn handle(i: &Arc<Inner>, remote: Id, f: Frame) -> Result<()> {
             }
         }
         Frame::Msgs { space, msgs, live } => {
-            ensure!(peer_has(&st, &remote, &space) && msgs.len() <= MAX_MSGS_PER_FRAME, "bad msgs");
+            ensure!(msgs.len() <= MAX_MSGS_PER_FRAME, "bad msgs");
+            if !peer_has(&st, &remote, &space) {
+                return Ok(());
+            }
             for m in msgs {
                 if let Err(e) = ingest_msg(i, &mut st, Some(remote), m, live) {
                     tracing::debug!("msg from {remote:?} dropped: {e:#}");
@@ -488,7 +517,9 @@ fn handle(i: &Arc<Inner>, remote: Id, f: Frame) -> Result<()> {
             }
         }
         Frame::Presence { space, voice } => {
-            ensure!(peer_has(&st, &remote, &space), "space not shared");
+            if !peer_has(&st, &remote, &space) {
+                return Ok(());
+            }
             match voice {
                 Some(p) => {
                     let ok = st.spaces.get(&space).is_some_and(|l| {
