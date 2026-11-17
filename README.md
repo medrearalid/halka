@@ -102,3 +102,31 @@ noktasından geriye tarihli işlem üretip geri sızmasını engeller. Bunun tes
 - **Ölçek.** Ses tam ağ (mesh) topolojisinde akar. 8–10 kişiye kadar rahattır; daha
   kalabalık odalar için seçici yönlendirme (SFU benzeri) gerekir.
 - **Platform.** Global bas-konuş ve DPAPI yalnızca Windows'ta vardır.
+
+## Doğrulama durumu
+
+**Bu makinede otomatik test edilenler**
+- **Rust testleri (16 adet).**
+  - İmza ve alan ayrımı.
+  - Yetki ve rütbe kuralları.
+  - Geriye tarihli işlem ile atılmayı ya da rütbe düşürülmeyi atlatma girişiminin reddi.
+  - Sıra bağımsız yakınsama.
+  - Opus → jitter buffer → kayıp gizleme → stereo panlama.
+  - Uçtan uca 3 düğüm: katılma, geçmiş, sohbet, düzenle/sil, atma, ekran paylaşımı GOP'ları.
+  - Yeniden başlatma: kimlik, mesaj ve ayarlar kalıcı; "IP gizle" açıkken relay üzerinden yeniden bağlanma.
+- **Gerçek uygulamanın iki örneği arasında, gerçek fare ve klavye girdisiyle:**
+  - isim, halka oluşturma, davet kodu üretme ve katılma;
+  - iki yönlü sohbet; `<img onerror>` denemesi düz metin kalıyor;
+  - rol oluşturma ve sağ tık menüsünden atama;
+  - gizli kanalın rolü olmayana görünmemesi;
+  - mesaj düzenleme ve silme;
+  - ayar kaydı ve halkadan atma;
+  - sesli oda ve ses paketlerinin karşıya ulaşması;
+  - ekran paylaşımı: 1920×1080 kareler karşıda çözülüp çiziliyor, pencere simge durumundayken de yaklaşık 29 fps sürüyor.
+
+**Henüz doğrulanmayanlar**
+- Bir insanın sesi gerçekten duyması ve yankı engellemenin kulakla değerlendirilmesi. Bu makinedeki kulaklık mikrofonu test sırasında tamamen sessizdi, ses hattı sentetik sinyalle test edildi.
+- İnternet üzerinden farklı NAT'lar arkasında doğrudan bağlantı. Testler aynı makinede yapıldı; relay yolu da çalıştı.
+- n0 relay ve DNS sunucularının Türkiye'den erişilebilirliği.
+- **İlk açılışta Windows Güvenlik Duvarı izni.** Windows "ağlara erişime izin verilsin mi" diye sorar. İzin verilirse doğrudan bağlantı kurulabilir, verilmezse yalnızca relay kullanılır.
+- **Aynı profilin iki kez açılması.** İkinci açılış sessizce kapanır.
