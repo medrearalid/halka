@@ -144,7 +144,7 @@ export interface Commands {
   set_name: { args: { name: string }; ret: void };
 
   create_space: { args: { name: string }; ret: Id };
-  /** Accepts a "bros1…" invite code. Resolves with the space id once joined. */
+  /** Accepts a "halka1…" invite code. Resolves with the space id once joined. */
   join_space: { args: { code: string }; ret: Id };
   leave_space: { args: { space: Id }; ret: void };
   rename_space: { args: { space: Id; name: string }; ret: void };
@@ -198,6 +198,8 @@ export interface Commands {
   set_ptt: { args: { down: boolean }; ret: void };
   /** 0..2, 1 = unchanged */
   set_peer_volume: { args: { member: Id; volume: number }; ret: void };
+  /** Local microphone test outside a room: feeds `levels` for self, sends nothing. */
+  mic_test: { args: { on: boolean }; ret: void };
   audio_devices: { args: {}; ret: AudioDevices };
   set_audio_devices: { args: { input: string | null; output: string | null }; ret: void };
 

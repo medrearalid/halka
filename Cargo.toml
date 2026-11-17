@@ -16,3 +16,9 @@ panic = "abort"
 
 [profile.dev.package."*"]
 opt-level = 2
+
+# quick local builds for manual testing (no LTO)
+[profile.fastrel]
+inherits = "release"
+lto = false
+codegen-units = 16

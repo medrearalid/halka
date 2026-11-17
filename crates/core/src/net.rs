@@ -129,11 +129,14 @@ pub(crate) fn spawn_background(i: &Arc<Inner>) {
         loop {
             tick.tick().await;
             n += 1;
-            let levels =
-                p.st.lock()
-                    .voice
+            let levels = {
+                let st = p.st.lock();
+                st.voice
                     .as_ref()
-                    .and_then(|v| v.engine.as_ref().map(|e| e.levels(p.me)));
+                    .and_then(|v| v.engine.as_ref())
+                    .or(st.mic_test.as_ref())
+                    .map(|e| e.levels(p.me))
+            };
             if let Some(l) = levels {
                 p.emit(Event::Levels(l));
             }

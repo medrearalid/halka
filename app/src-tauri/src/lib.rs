@@ -255,6 +255,11 @@ fn set_peer_volume(n: State<Node>, member: Id, volume: f32) {
 }
 
 #[tauri::command]
+fn mic_test(n: State<Node>, on: bool) -> R<()> {
+    n.mic_test(on).map_err(e)
+}
+
+#[tauri::command]
 fn audio_devices(n: State<Node>) -> AudioDevices {
     n.audio_devices()
 }
@@ -270,7 +275,10 @@ fn get_settings(n: State<Node>) -> Settings {
 }
 
 #[tauri::command]
-fn set_settings(n: State<Node>, settings: Settings) -> R<()> {
+fn set_settings(n: State<Node>, mut settings: Settings) -> R<()> {
+    // devices are owned by set_audio_devices; the UI's Settings shape doesn't carry them
+    let cur = n.settings();
+    (settings.input, settings.output) = (cur.input, cur.output);
     n.set_settings(settings).map_err(e)
 }
 
@@ -358,6 +366,9 @@ fn profile() -> Option<String> {
     std::env::var("HALKA_PROFILE").ok()
 }
 
+/// Keep capture/encode alive while the window is hidden or occluded (sharing a game, etc.).
+const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,CalculateNativeWinOcclusion --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows";
+
 pub fn run() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
@@ -374,6 +385,16 @@ pub fn run() {
             }) {
                 dir = dir.join("profiles").join(p);
             }
+            // per-profile WebView2 data: two profiles can run side by side and never share storage
+            tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
+                .title("Halka")
+                .inner_size(1240.0, 800.0)
+                .min_inner_size(860.0, 560.0)
+                .theme(Some(tauri::Theme::Dark))
+                .background_color(tauri::window::Color(13, 15, 18, 255))
+                .data_directory(dir.join("webview"))
+                .additional_browser_args(BROWSER_ARGS)
+                .build()?;
             let (node, rx) = tauri::async_runtime::block_on(Node::start(&dir))?;
             app.manage(node.clone());
             tauri::async_runtime::spawn(pump(app.handle().clone(), node, rx));
@@ -407,6 +428,7 @@ pub fn run() {
             set_deafened,
             set_ptt,
             set_peer_volume,
+            mic_test,
             audio_devices,
             set_audio_devices,
             get_settings,

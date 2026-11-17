@@ -395,7 +395,7 @@ export function createMockBackend(): Backend {
     },
     join_space: async ({ code }) => {
       await delay(700);
-      if (!/^bros1[0-9a-z]{8,}$/i.test(String(code).trim())) throw "Geçersiz davet kodu";
+      if (!/^halka1[0-9a-z]{8,}$/i.test(String(code).trim())) throw "Geçersiz davet kodu";
       const s: MSpace = {
         id: newId(), name: "Mahalle", owner: P.burak, channels: [ch("genel", "text"), ch("Oda", "voice")], roles: [],
         members: [mkMember(me.id, [], P.burak), mkMember(P.burak, [], P.burak)], bans: [], invites: [],
@@ -423,7 +423,7 @@ export function createMockBackend(): Backend {
       const id = newId();
       s.invites.push({ id, created_by: me.id, expires: expiresInMs === null ? null : Date.now() + expiresInMs, max_uses: maxUses, uses: 0 });
       changed();
-      return `bros1${id.slice(0, 40)}`;
+      return `halka1${id.slice(0, 40)}`;
     },
     revoke_invite: ({ space, invite }) => {
       const s = sp(space);
@@ -563,6 +563,7 @@ export function createMockBackend(): Backend {
     },
     set_ptt: ({ down }) => void (pttDown = down),
     set_peer_volume: () => {},
+    mic_test: () => undefined,
     audio_devices: () => structuredClone(devices),
     set_audio_devices: ({ input, output }) => void (devices = { ...devices, input, output }),
     get_settings: () => ({ ...settings }),

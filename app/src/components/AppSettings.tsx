@@ -120,6 +120,13 @@ function Audio() {
   }, []);
   useEffect(() => setVad(settings.vad_threshold), [settings.vad_threshold]);
 
+  // Outside a room, run a local mic test so the threshold meter is live.
+  useEffect(() => {
+    if (inVoice) return;
+    call("mic_test", { on: true }).catch(() => {});
+    return () => void call("mic_test", { on: false }).catch(() => {});
+  }, [inVoice]);
+
   useEffect(() => {
     if (!capturing) return;
     const onKey = (e: KeyboardEvent) => {
@@ -128,8 +135,19 @@ function Audio() {
       if (e.code !== "Escape") saveSettings({ ptt_key: e.code });
       setCapturing(false);
     };
+    // mouse side buttons are popular PTT keys; the core polls them globally
+    const onMouse = (e: MouseEvent) => {
+      if (e.button !== 3 && e.button !== 4) return;
+      e.preventDefault();
+      saveSettings({ ptt_key: e.button === 3 ? "Mouse4" : "Mouse5" });
+      setCapturing(false);
+    };
     window.addEventListener("keydown", onKey, { capture: true });
-    return () => window.removeEventListener("keydown", onKey, { capture: true });
+    window.addEventListener("mousedown", onMouse, { capture: true });
+    return () => {
+      window.removeEventListener("keydown", onKey, { capture: true });
+      window.removeEventListener("mousedown", onMouse, { capture: true });
+    };
   }, [capturing]);
 
   const setDevices = (input: string | null, output: string | null) => {

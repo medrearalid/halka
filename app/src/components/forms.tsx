@@ -11,7 +11,9 @@ function useSubmit<T>(fn: () => Promise<T>, done?: (v: T) => void) {
     setBusy(true);
     setError(null);
     try {
-      done?.(await fn());
+      // not `done?.(await fn())`: optional call skips evaluating its argument when done is undefined
+      const v = await fn();
+      done?.(v);
     } catch (e) {
       setError(errText(e));
     } finally {
@@ -57,7 +59,7 @@ export function CreateSpaceForm({ onDone, autoFocus }: { onDone?: (id: Id) => vo
 
 export function JoinForm({ onDone, autoFocus }: { onDone?: (id: Id) => void; autoFocus?: boolean }) {
   const [code, setCode] = useState("");
-  const valid = code.trim().startsWith("bros1");
+  const valid = code.trim().startsWith("halka1");
   const { busy, error, run } = useSubmit(
     () => call("join_space", { code: code.trim() }),
     (id) => {
@@ -75,7 +77,7 @@ export function JoinForm({ onDone, autoFocus }: { onDone?: (id: Id) => void; aut
     >
       <input
         className="field font-mono text-xs"
-        placeholder="bros1…"
+        placeholder="halka1…"
         value={code}
         autoFocus={autoFocus}
         spellCheck={false}

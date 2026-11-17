@@ -131,7 +131,13 @@ fn virtual_key(code: &str) -> u32 {
     match code {
         _ if code.len() == 4 && code.starts_with("Key") && b[3].is_ascii_uppercase() => b[3] as u32,
         _ if code.len() == 6 && code.starts_with("Digit") && b[5].is_ascii_digit() => b[5] as u32,
-        _ if code.starts_with('F') && code[1..].parse::<u32>().is_ok_and(|n| (1..=24).contains(&n)) => 0x6F + code[1..].parse::<u32>().unwrap_or(0),
+        _ if code.starts_with('F')
+            && code[1..]
+                .parse::<u32>()
+                .is_ok_and(|n| (1..=24).contains(&n)) =>
+        {
+            0x6F + code[1..].parse::<u32>().unwrap_or(0)
+        }
         "Mouse4" => 0x05,
         "Mouse5" => 0x06,
         "Space" => 0x20,
@@ -151,7 +157,9 @@ fn virtual_key(code: &str) -> u32 {
 #[cfg(windows)]
 fn key_down(vk: u32) -> bool {
     // SAFETY: plain Win32 query of one key's state; no hooks, no input interception.
-    vk != 0 && unsafe { windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(vk as i32) } < 0
+    vk != 0
+        && unsafe { windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(vk as i32) }
+            < 0
 }
 
 #[cfg(not(windows))]
@@ -383,15 +391,11 @@ impl Voice {
     pub fn levels(&self, me: Id) -> Vec<(Id, f32)> {
         let m = self.sh.mixer.lock();
         let mut v: Vec<(Id, f32)> = m.peers.iter().map(|(id, p)| (*id, p.level)).collect();
+        let raw = f32::from_bits(self.sh.self_level.load(Relaxed));
+        // the mic test (deafened, no peers) shows the raw level so the threshold can be tuned
+        let test = self.sh.deafened.load(Relaxed) && m.peers.is_empty();
         let tx = self.sh.transmitting.load(Relaxed);
-        v.push((
-            me,
-            if tx {
-                f32::from_bits(self.sh.self_level.load(Relaxed))
-            } else {
-                0.0
-            },
-        ));
+        v.push((me, if tx || test { raw } else { 0.0 }));
         v
     }
 

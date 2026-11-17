@@ -35,7 +35,7 @@ export function Onboarding() {
         ) : step === "choose" ? (
           <div className="flex flex-col gap-2">
             <Choice icon={<Plus className="size-4" />} title="Yeni halka oluştur" body="Arkadaşlarını davet edeceğin yeni bir alan." onClick={() => setStep("create")} />
-            <Choice icon={<Ticket className="size-4" />} title="Davet koduyla katıl" body="Biri sana bros1… ile başlayan bir kod verdiyse." onClick={() => setStep("join")} />
+            <Choice icon={<Ticket className="size-4" />} title="Davet koduyla katıl" body="Biri sana halka1… ile başlayan bir kod verdiyse." onClick={() => setStep("join")} />
           </div>
         ) : (
           <div className="flex flex-col gap-3">

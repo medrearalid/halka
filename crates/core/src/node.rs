@@ -68,6 +68,8 @@ pub(crate) struct St {
     pub stream_config: Option<Arc<Vec<u8>>>,
     pub watching: HashMap<Id, (StreamSink, Arc<std::sync::atomic::AtomicU64>)>,
     pub online: bool,
+    /// Local mic test outside rooms (settings meter); sends nothing.
+    pub mic_test: Option<Voice>,
 }
 
 pub(crate) struct Inner {
@@ -183,6 +185,7 @@ impl Node {
                 stream_config: None,
                 watching: HashMap::new(),
                 online: false,
+                mic_test: None,
             }),
             voice_targets: RwLock::new(Vec::new()),
             last_keyframe: Mutex::new(
@@ -523,6 +526,7 @@ impl Node {
         ensure!(log.state.can_view(&i.me, &channel), "bu odaya giremezsin");
         let can_speak = log.state.can_in(&i.me, &channel, Perms::SPEAK);
         leave_voice_locked(i, &mut st);
+        st.mic_test = None;
         let weak: Weak<Inner> = Arc::downgrade(&self.0);
         let send = Box::new(move |dg: Vec<u8>| {
             let Some(i) = weak.upgrade() else { return };
@@ -632,6 +636,17 @@ impl Node {
         {
             e.set_volume(member, volume);
         }
+    }
+
+    pub fn mic_test(&self, on: bool) -> Result<()> {
+        let mut st = self.0.st.lock();
+        st.mic_test = None; // close the device before reopening
+        if on && st.voice.is_none() {
+            let v = Voice::start(&voice_opts(&st.settings), Box::new(|_| {}))?;
+            v.set_deafened(true); // no playback, no transmit
+            st.mic_test = Some(v);
+        }
+        Ok(())
     }
 
     pub fn audio_devices(&self) -> api::AudioDevices {
