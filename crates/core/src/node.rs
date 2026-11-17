@@ -614,6 +614,16 @@ impl Node {
         Ok(())
     }
 
+    /// Current voice levels (what the UI receives as `levels`), for tests and diagnostics.
+    pub fn debug_levels(&self) -> Vec<(Id, f32)> {
+        let st = self.0.st.lock();
+        st.voice
+            .as_ref()
+            .and_then(|v| v.engine.as_ref())
+            .map(|e| e.levels(self.0.me))
+            .unwrap_or_default()
+    }
+
     pub fn set_ptt(&self, down: bool) {
         if let Some(e) = self
             .0

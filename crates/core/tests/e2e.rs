@@ -273,3 +273,104 @@ async fn survives_restart_and_relay_only() {
     a.shutdown().await;
     b.shutdown().await;
 }
+
+/// Real audio over the network: a's mic is a 440 Hz tone, b (deafened, so nothing is played
+/// aloud) must measure a's voice level. Run once over any path and once forced through the
+/// public relays (relay_only on both ends), which exercises the internet path from this host.
+async fn tone_reaches_peer(relay_only: bool) {
+    let dir = tempfile::tempdir().unwrap();
+    let mk = |name: &'static str| {
+        let p = dir.path().join(name);
+        async move {
+            // settings are read at start: write them first through a throwaway node
+            let (n, mut rx) = Node::start(&p).await.unwrap();
+            tokio::spawn(async move { while rx.recv().await.is_some() {} });
+            n.set_name(name).unwrap();
+            let mut s = n.settings();
+            s.relay_only = relay_only;
+            s.vad_threshold = 0.0;
+            if name == "ayse" {
+                s.input = Some("test-tone".into());
+                // a steady sine is exactly what noise suppression is built to remove
+                s.noise_suppression = false;
+                s.echo_cancellation = false;
+            }
+            n.set_settings(s).unwrap();
+            n.shutdown().await;
+            drop(n);
+            for _ in 0..50 {
+                if let Ok((n, mut rx)) = Node::start(&p).await {
+                    tokio::spawn(async move { while rx.recv().await.is_some() {} });
+                    return n;
+                }
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+            panic!("restart failed");
+        }
+    };
+    let a = mk("ayse").await;
+    let b = mk("berk").await;
+    let s = a.create_space("Ton").unwrap();
+    b.join_space(&a.create_invite(s, None, None).unwrap())
+        .await
+        .unwrap();
+    let vc = voice_channel(&a, s);
+    a.voice_join(s, vc).unwrap();
+    b.voice_join(s, vc).unwrap();
+    b.set_deafened(true).unwrap();
+    until("both in room", || {
+        a.snapshot().spaces[0]
+            .channels
+            .iter()
+            .any(|c| c.id == vc && c.voice.len() == 2)
+    })
+    .await;
+    if relay_only {
+        let m = b.snapshot().spaces[0]
+            .members
+            .iter()
+            .find(|m| m.id == a.id())
+            .unwrap()
+            .clone();
+        assert_eq!(
+            m.conn,
+            halka_core::api::ConnKind::Relay,
+            "relay_only must not go direct"
+        );
+        eprintln!("relay rtt: {:?} ms", m.rtt_ms);
+    }
+    let mut best = 0f32;
+    for _ in 0..100 {
+        best = best.max(
+            b.debug_levels()
+                .into_iter()
+                .find(|(id, _)| *id == a.id())
+                .map(|(_, l)| l)
+                .unwrap_or(0.0),
+        );
+        if best > 0.5 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let own = a
+        .debug_levels()
+        .into_iter()
+        .find(|(id, _)| *id == a.id())
+        .map(|(_, l)| l)
+        .unwrap_or(0.0);
+    eprintln!("a's own level {own:.2}; b hears a at level {best:.2} (relay_only={relay_only})");
+    assert!(best > 0.5, "tone did not arrive: {best}");
+    a.shutdown().await;
+    b.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn audio_tone_direct() {
+    tone_reaches_peer(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn audio_tone_over_public_relay() {
+    tone_reaches_peer(true).await;
+}

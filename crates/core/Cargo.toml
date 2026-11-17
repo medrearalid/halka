@@ -28,7 +28,12 @@ ringbuf = "0.4"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Security_Cryptography", "Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse"] }
 
+[features]
+# synthetic 440 Hz mic for end-to-end audio tests (input device name "test-tone")
+test-tone = []
+
 [dev-dependencies]
+halka-core = { path = ".", features = ["test-tone"] }
 tempfile = "3"
 parking_lot = "0.12"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

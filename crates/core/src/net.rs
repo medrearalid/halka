@@ -912,6 +912,8 @@ fn ingest_ops(
             p.joining = None;
         }
         send_summaries(i, st, remote);
+        // they missed our voice presence while joining; without this they'd never hear the room
+        announce_presence(st, remote);
     }
     if !st.spaces[&space].state.is_member(&i.me) && !st.joins.contains_key(&space) {
         let name = st.spaces[&space].state.name.clone();

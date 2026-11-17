@@ -244,9 +244,21 @@ impl Voice {
         let ich = icfg.channels() as usize;
         let mut rs = Resampler::new(icfg.sample_rate(), RATE);
         let mut mono = Vec::new();
+        // test builds only: replace the mic with a 440 Hz tone, clocked by the real capture device
+        let tone = cfg!(feature = "test-tone") && opts.input.as_deref() == Some("test-tone");
+        let (mut phase, step) = (
+            0f32,
+            std::f32::consts::TAU * 440.0 / icfg.sample_rate() as f32,
+        );
         let mut on_input = move |data: &[f32]| {
             mono.clear();
             mono.extend(data.chunks(ich).map(|c| c.iter().sum::<f32>() / ich as f32));
+            if tone {
+                for s in mono.iter_mut() {
+                    *s = phase.sin() * 0.3;
+                    phase = (phase + step) % std::f32::consts::TAU;
+                }
+            }
             rs.push(&mono, |s| {
                 let _ = cap_tx.try_push(s);
             });
