@@ -114,6 +114,9 @@ noktasından geriye tarihli işlem üretip geri sızmasını engeller. Bunun tes
   - Ses hattı: kayıp gizleme ve stereo panlama.
   - Uçtan uca 3 düğüm: katılma, sohbet, düzenle/sil, atma, ekran paylaşımı.
   - Yeniden başlatma sonrası kalıcılık.
+- **Yankı engelleme:** hoparlörden mikrofona sızan konuşma benzeri sinyalin yaklaşık 50 dB'i siliniyor; AEC kapalıyken bu oran 3 dB.
+- **Gerçek mikrofon, ağ üzerinden:** AMD mikrofon dizisinin gerçek oda sesi yakalandı, kodlandı, gönderildi ve karşıda −78 dBFS olarak çözüldü. Kendi mikrofonunla tekrarlamak için: `HALKA_TEST_MIC="<aygıt adı>" cargo test --test e2e real_mic -- --ignored`.
+- **Kurulum:** sessiz kurulum, üzerine kurulum ve kaldırma çalışıyor. Etkileşimli sihirbaz da Hoş geldin → Kur → Bitir adımlarıyla dosyaları, Başlat menüsünü ve kaldırma kaydını oluşturdu.
 - **Gerçek ses, ağ üzerinden.** A'nın mikrofonu yerine 440 Hz test tonu verildi; B tonu doğrudan bağlantıda 0,77, yalnızca public relay üzerinden 0,72 seviyesinde duydu. İkinci ölçüm aynı zamanda relay'lere bu makineden (Türkiye) erişimi doğruluyor; gidiş-dönüş süresi yaklaşık 240 ms.
 - **Gerçek uygulamanın iki örneği arasında, gerçek fare ve klavye girdisiyle:**
   - isim, halka oluşturma, davet kodu ve katılma;
@@ -125,6 +128,6 @@ noktasından geriye tarihli işlem üretip geri sızmasını engeller. Bunun tes
   - ekran paylaşımı: 1920×1080 kareler karşıda çiziliyor, pencere simge durumundayken de yaklaşık 29 fps sürüyor.
 
 **Henüz doğrulanmayanlar**
-- **İnsan kulağıyla ses ve yankı engelleme.** Bu makinedeki kulaklık mikrofonu test sırasında kapalıydı (sıfır sinyal); ses hattı sentetik tonla doğrulandı.
+- **Bir insanın sesi ve kulakla dinleme.** Bu makinedeki kulaklık mikrofonu test sırasında kapalıydı; ses hattı test tonu ve gerçek oda sesiyle ölçüldü.
 - **İki ayrı evden doğrudan bağlantı (NAT delme).** Doğrudan bağlantı yalnızca aynı makinede, relay yolu ise internet üzerinden test edildi; doğrudan kurulamazsa relay devreye girer.
 - **İlk açılışta Windows Güvenlik Duvarı izni.** Windows izin ister. İzin verilirse doğrudan bağlantı kurulabilir, verilmezse relay kullanılır.

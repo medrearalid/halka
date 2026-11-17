@@ -50,6 +50,8 @@ struct Peer {
     volume: f32,
     pan: f32,
     level: f32,
+    /// Raw received loudness (dBFS), unclamped: diagnostics and tests.
+    db: f32,
 }
 
 #[derive(Default)]
@@ -411,6 +413,11 @@ impl Voice {
         v
     }
 
+    /// Unclamped dBFS of what we last mixed from `peer` (diagnostics).
+    pub fn peer_db(&self, peer: Id) -> Option<f32> {
+        self.sh.mixer.lock().peers.get(&peer).map(|p| p.db)
+    }
+
     /// Incoming voice datagram from `peer` (already authorized by the node).
     pub fn receive(&self, peer: Id, dg: &[u8]) {
         receive_into(&self.sh, peer, dg)
@@ -443,6 +450,7 @@ fn receive_into(sh: &Shared, peer: Id, dg: &[u8]) {
                     volume,
                     pan,
                     level: 0.0,
+                    db: -200.0,
                 })
             }
         };
@@ -503,7 +511,9 @@ fn mix(sh: &Shared, frames: usize, out: &mut Vec<f32>, reference: &mut impl Prod
                 out[i * 2 + 1] += s * gr;
                 mono[i] += s * p.volume;
             }
-            let lvl = level_of(&[(energy / frames as f32).sqrt()]);
+            let rms = (energy / frames as f32).sqrt();
+            p.db = 20.0 * rms.max(1e-10).log10();
+            let lvl = level_of(&[rms]);
             p.level = if lvl > p.level {
                 lvl
             } else {
@@ -664,6 +674,61 @@ mod tests {
             .fold((0.0, 0.0), |(l, r), c| (l + c[0].abs(), r + c[1].abs()));
         assert!(r > 10.0 && l < r * 0.01, "panned right: l={l} r={r}");
         assert!(out.iter().all(|s| s.abs() <= 1.0));
+    }
+
+    /// The far end plays through our speaker and leaks back into the mic (delayed, quieter).
+    /// With AEC on, that echo must be strongly suppressed; with it off, it passes through.
+    fn echo_residual_db(aec: bool) -> f32 {
+        let mut apm = sonora::AudioProcessing::builder()
+            .config(apm_config(false, aec))
+            .capture_config(sonora::StreamConfig::new(RATE, 1))
+            .render_config(sonora::StreamConfig::new(RATE, 1))
+            .build();
+        // speech-like: broadband noise with a syllable-rate envelope (deterministic LCG)
+        let mut seed = 12345u32;
+        let far: Vec<f32> = (0..RATE as usize * 8)
+            .map(|i| {
+                seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+                let n = (seed >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0;
+                let t = i as f32 / RATE as f32;
+                n * 0.3 * (0.3 + 0.7 * (t * 4.0 * std::f32::consts::TAU).sin().abs())
+            })
+            .collect();
+        let delay = 30 * RATE as usize / 1000;
+        let (mut out, mut sink) = ([0f32; FRAME10], [0f32; FRAME10]);
+        let (mut e_in, mut e_out) = (0f64, 0f64);
+        for (k, chunk) in far.chunks(FRAME10).enumerate() {
+            let mic: Vec<f32> = (0..FRAME10)
+                .map(|j| {
+                    let i = k * FRAME10 + j;
+                    if i >= delay {
+                        far[i - delay] * 0.5
+                    } else {
+                        0.0
+                    }
+                })
+                .collect();
+            apm.process_render_f32(&[chunk], &mut [&mut sink[..]])
+                .unwrap();
+            apm.process_capture_f32(&[&mic], &mut [&mut out]).unwrap();
+            if k > 400 {
+                // after 4 s of convergence
+                e_in += mic.iter().map(|x| (*x as f64).powi(2)).sum::<f64>();
+                e_out += out.iter().map(|x| (*x as f64).powi(2)).sum::<f64>();
+            }
+        }
+        (10.0 * (e_out.max(1e-12) / e_in).log10()) as f32
+    }
+
+    #[test]
+    fn echo_cancellation_removes_speaker_leak() {
+        let (on, off) = (echo_residual_db(true), echo_residual_db(false));
+        eprintln!("echo residual: aec on {on:.1} dB, off {off:.1} dB");
+        assert!(
+            on < -20.0,
+            "AEC should remove >20 dB of echo, got {on:.1} dB"
+        );
+        assert!(on < off - 15.0);
     }
 
     #[test]

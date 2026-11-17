@@ -624,6 +624,17 @@ impl Node {
             .unwrap_or_default()
     }
 
+    /// Unclamped received loudness of `member` in dBFS (diagnostics).
+    pub fn debug_peer_db(&self, member: Id) -> Option<f32> {
+        self.0
+            .st
+            .lock()
+            .voice
+            .as_ref()
+            .and_then(|v| v.engine.as_ref())
+            .and_then(|e| e.peer_db(member))
+    }
+
     pub fn set_ptt(&self, down: bool) {
         if let Some(e) = self
             .0

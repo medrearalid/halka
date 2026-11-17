@@ -278,8 +278,12 @@ async fn survives_restart_and_relay_only() {
 /// aloud) must measure a's voice level. Run once over any path and once forced through the
 /// public relays (relay_only on both ends), which exercises the internet path from this host.
 async fn tone_reaches_peer(relay_only: bool) {
+    voice_reaches_peer(relay_only, "test-tone").await;
+}
+
+async fn voice_reaches_peer(relay_only: bool, mic: &'static str) -> f32 {
     let dir = tempfile::tempdir().unwrap();
-    let mk = |name: &'static str| {
+    let mk = move |name: &'static str| {
         let p = dir.path().join(name);
         async move {
             // settings are read at start: write them first through a throwaway node
@@ -290,7 +294,7 @@ async fn tone_reaches_peer(relay_only: bool) {
             s.relay_only = relay_only;
             s.vad_threshold = 0.0;
             if name == "ayse" {
-                s.input = Some("test-tone".into());
+                s.input = Some(mic.into());
                 // a steady sine is exactly what noise suppression is built to remove
                 s.noise_suppression = false;
                 s.echo_cancellation = false;
@@ -359,10 +363,33 @@ async fn tone_reaches_peer(relay_only: bool) {
         .find(|(id, _)| *id == a.id())
         .map(|(_, l)| l)
         .unwrap_or(0.0);
-    eprintln!("a's own level {own:.2}; b hears a at level {best:.2} (relay_only={relay_only})");
-    assert!(best > 0.5, "tone did not arrive: {best}");
+    let db = b.debug_peer_db(a.id()).unwrap_or(-200.0);
+    eprintln!(
+        "a's own level {own:.2}; b hears a at level {best:.2}, {db:.1} dBFS (relay_only={relay_only}, mic={mic})"
+    );
+    if mic == "test-tone" {
+        assert!(best > 0.5, "tone did not arrive: {best}");
+    }
     a.shutdown().await;
     b.shutdown().await;
+    db
+}
+
+/// A real microphone (not synthetic) captured, encoded, sent and decoded on the other side.
+/// Hardware-dependent: `HALKA_TEST_MIC="<device name>" cargo test --test e2e real_mic -- --ignored`
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore]
+async fn real_mic_reaches_peer() {
+    let mic: &'static str = Box::leak(
+        std::env::var("HALKA_TEST_MIC")
+            .expect("set HALKA_TEST_MIC")
+            .into_boxed_str(),
+    );
+    let db = voice_reaches_peer(false, mic).await;
+    assert!(
+        db > -120.0,
+        "no real signal arrived ({db:.1} dBFS); is the mic muted?"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
