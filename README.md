@@ -106,28 +106,25 @@ noktasından geriye tarihli işlem üretip geri sızmasını engeller. Bunun tes
 ## Doğrulama durumu
 
 **Bu makinede otomatik test edilenler**
-- **Rust testleri (16 adet).**
+- **Rust testleri: 16 birim + 5 uçtan uca.**
   - İmza ve alan ayrımı.
   - Yetki ve rütbe kuralları.
-  - Geriye tarihli işlem ile atılmayı ya da rütbe düşürülmeyi atlatma girişiminin reddi.
+  - Geriye tarihli işlemle atılmayı ya da rütbe düşürülmeyi atlatma girişiminin reddi.
   - Sıra bağımsız yakınsama.
-  - Opus → jitter buffer → kayıp gizleme → stereo panlama.
-  - Uçtan uca 3 düğüm: katılma, geçmiş, sohbet, düzenle/sil, atma, ekran paylaşımı GOP'ları.
-  - Yeniden başlatma: kimlik, mesaj ve ayarlar kalıcı; "IP gizle" açıkken relay üzerinden yeniden bağlanma.
+  - Ses hattı: kayıp gizleme ve stereo panlama.
+  - Uçtan uca 3 düğüm: katılma, sohbet, düzenle/sil, atma, ekran paylaşımı.
+  - Yeniden başlatma sonrası kalıcılık.
+- **Gerçek ses, ağ üzerinden.** A'nın mikrofonu yerine 440 Hz test tonu verildi; B tonu doğrudan bağlantıda 0,77, yalnızca public relay üzerinden 0,72 seviyesinde duydu. İkinci ölçüm aynı zamanda relay'lere bu makineden (Türkiye) erişimi doğruluyor; gidiş-dönüş süresi yaklaşık 240 ms.
 - **Gerçek uygulamanın iki örneği arasında, gerçek fare ve klavye girdisiyle:**
-  - isim, halka oluşturma, davet kodu üretme ve katılma;
+  - isim, halka oluşturma, davet kodu ve katılma;
   - iki yönlü sohbet; `<img onerror>` denemesi düz metin kalıyor;
-  - rol oluşturma ve sağ tık menüsünden atama;
-  - gizli kanalın rolü olmayana görünmemesi;
-  - mesaj düzenleme ve silme;
-  - "herkes" rolünden yetki kaldırma;
+  - rol oluşturma ve sağ tık menüsünden atama; "herkes" rolünden yetki kaldırma;
+  - gizli kanal; mesaj düzenleme ve silme;
   - ayar kaydı ve halkadan atma;
   - aynı profil ikinci kez açılınca sessizce kapanma;
-  - sesli oda ve ses paketlerinin karşıya ulaşması;
-  - ekran paylaşımı: 1920×1080 kareler karşıda çözülüp çiziliyor, pencere simge durumundayken de yaklaşık 29 fps sürüyor.
+  - ekran paylaşımı: 1920×1080 kareler karşıda çiziliyor, pencere simge durumundayken de yaklaşık 29 fps sürüyor.
 
 **Henüz doğrulanmayanlar**
-- Bir insanın sesi gerçekten duyması ve yankı engellemenin kulakla değerlendirilmesi. Bu makinedeki kulaklık mikrofonu test sırasında tamamen sessizdi, ses hattı sentetik sinyalle test edildi.
-- İnternet üzerinden farklı NAT'lar arkasında doğrudan bağlantı. Testler aynı makinede yapıldı; relay yolu da çalıştı.
-- n0 relay ve DNS sunucularının Türkiye'den erişilebilirliği.
-- **İlk açılışta Windows Güvenlik Duvarı izni.** Windows "ağlara erişime izin verilsin mi" diye sorar. İzin verilirse doğrudan bağlantı kurulabilir, verilmezse yalnızca relay kullanılır.
+- **İnsan kulağıyla ses ve yankı engelleme.** Bu makinedeki kulaklık mikrofonu test sırasında kapalıydı (sıfır sinyal); ses hattı sentetik tonla doğrulandı.
+- **İki ayrı evden doğrudan bağlantı (NAT delme).** Doğrudan bağlantı yalnızca aynı makinede, relay yolu ise internet üzerinden test edildi; doğrudan kurulamazsa relay devreye girer.
+- **İlk açılışta Windows Güvenlik Duvarı izni.** Windows izin ister. İzin verilirse doğrudan bağlantı kurulabilir, verilmezse relay kullanılır.
