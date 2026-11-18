@@ -66,7 +66,7 @@ function Shortcuts() {
             <Row label="Tüm ekranı paylaş" desc="Kapalıyken öndeki pencere, açıkken o pencerenin bulunduğu ekran paylaşılır.">
               <Switch checked={fullScreen} onCheckedChange={(value) => saveSettings({ quick_share_full_screen: value })} aria-label="Hızlı paylaşımda tüm ekranı paylaş" />
             </Row>
-            <Row label="Yayını tam ekran izle" desc="Ses odandaki yayını öne getirir. Tekrar basarak tam ekrandan çıkabilirsin.">
+            <Row label="Yayını tam ekran izle" desc="Ses odandaki yayını öne getirir. Aynı tuşlarla veya Esc ile önceki pencereye dönersin.">
               <Kbd>{WATCH_FULLSCREEN_SHORTCUT}</Kbd>
             </Row>
           </>

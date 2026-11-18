@@ -94,7 +94,13 @@ export function App() {
     const applyFullscreen = async () => {
       if (fullscreen && document.fullscreenElement) await document.exitFullscreen();
       if (fullscreen === !!useApp.getState().watchFullscreen) {
-        await getCurrentWindow().setFullscreen(fullscreen);
+        try {
+          await getCurrentWindow().setFullscreen(fullscreen);
+        } finally {
+          if (!fullscreen && !useApp.getState().watchFullscreen) {
+            await call("return_watch_focus");
+          }
+        }
       }
     };
     void applyFullscreen().catch(() => {

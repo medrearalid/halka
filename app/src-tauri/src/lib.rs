@@ -16,6 +16,10 @@ use tauri::{AppHandle, Emitter, Manager, State};
 mod capture;
 #[cfg(windows)]
 use capture::{capture_preview, capture_sources, capture_start, capture_stop};
+#[cfg(windows)]
+mod watch_focus;
+#[cfg(windows)]
+use watch_focus::{WatchFocus, return_watch_focus};
 
 type R<T> = Result<T, String>;
 
@@ -537,6 +541,8 @@ pub fn run() {
             app.manage(node.clone());
             #[cfg(windows)]
             app.manage(capture::CaptureState::default());
+            #[cfg(windows)]
+            app.manage(WatchFocus::default());
             // OS-level hotkeys: they fire while a game (or any other app) has focus
             use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, ShortcutState};
             let hk = node.clone();
@@ -560,6 +566,7 @@ pub fn run() {
                                 .and_then(|space| space.channels.iter().find(|channel| channel.id == voice.channel))
                                 .and_then(|channel| channel.streams.iter().find(|&&member| member != snapshot.me.id));
                             if let Some(member) = member {
+                                _app.state::<WatchFocus>().remember();
                                 show_main(_app);
                                 let _ = _app.emit("watch_fullscreen", json!({
                                     "space": voice.space, "channel": voice.channel, "member": member,
@@ -648,6 +655,8 @@ pub fn run() {
             capture_stop,
             #[cfg(windows)]
             capture_preview,
+            #[cfg(windows)]
+            return_watch_focus,
             watch,
             unwatch,
         ])

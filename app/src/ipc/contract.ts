@@ -227,6 +227,7 @@ export interface Commands {
   capture_start: { args: { id: string; source: string; preset: string }; ret: void };
   capture_stop: { args: { id: string }; ret: void };
   capture_preview: { args: { id: string; preview: unknown }; ret: void };
+  return_watch_focus: { args: {}; ret: void };
   /** Announce we're sharing in our current voice channel. */
   stream_start: { args: {}; ret: void };
   /** Body is a raw ArrayBuffer packet (NOT json): invoke("stream_packet", packet). */
