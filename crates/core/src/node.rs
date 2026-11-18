@@ -161,18 +161,9 @@ impl Node {
                 lookup.add_endpoint_info(a);
             }
         }
-        let custom = settings.relay_only || !settings.relays.is_empty();
-        let ep = match bind(&key, &lookup, &settings).await {
-            Ok(ep) => ep,
-            // a bad privacy/relay setting must never brick the app: fall back to defaults
-            Err(e) if custom => {
-                tracing::warn!("bind with custom network settings failed: {e:#}");
-                bind(&key, &lookup, &Settings::default())
-                    .await
-                    .context("ağ başlatılamadı")?
-            }
-            Err(e) => return Err(e.context("ağ başlatılamadı")),
-        };
+        let ep = bind_with_fallback(&key, &lookup, &settings)
+            .await
+            .context("ağ başlatılamadı")?;
 
         let (tx, rx) = mpsc::unbounded_channel();
         let inner = Arc::new(Inner {
@@ -851,6 +842,50 @@ impl Node {
 
 // ---------------------------------------------------------------------- helpers
 
+/// A bad network setting must never brick the app, but a fallback must never drop relay-only
+/// either: that would silently hand our IP to peers. So relay-only falls back to the default
+/// relays and, failing that, to an offline endpoint the user can fix from settings.
+async fn bind_with_fallback(
+    key: &iroh::SecretKey,
+    lookup: &MemoryLookup,
+    settings: &Settings,
+) -> Result<Endpoint> {
+    let e = match bind(key, lookup, settings).await {
+        Ok(ep) => return Ok(ep),
+        Err(e) => e,
+    };
+    if !settings.relays.is_empty() {
+        tracing::warn!("bind with custom relays failed: {e:#}");
+        let fallback = Settings {
+            relays: vec![],
+            ..settings.clone()
+        };
+        if let Ok(ep) = bind(key, lookup, &fallback).await {
+            return Ok(ep);
+        }
+    } else if !settings.relay_only {
+        return Err(e);
+    }
+    if settings.relay_only {
+        tracing::warn!("relay-only bind failed, starting offline to keep the IP hidden: {e:#}");
+        return bind_offline(key).await;
+    }
+    bind(key, lookup, &Settings::default()).await
+}
+
+/// iroh needs at least one transport, so "offline" is a loopback-only socket: nothing outside
+/// this machine can reach it and no address of ours leaves it.
+async fn bind_offline(key: &iroh::SecretKey) -> Result<Endpoint> {
+    Ok(Endpoint::builder(presets::N0)
+        .secret_key(key.clone())
+        .alpns(vec![wire::ALPN.to_vec()])
+        .clear_ip_transports()
+        .clear_relay_transports()
+        .bind_addr("127.0.0.1:0")?
+        .bind()
+        .await?)
+}
+
 async fn bind(
     key: &iroh::SecretKey,
     lookup: &MemoryLookup,
@@ -1094,5 +1129,38 @@ fn space_view(i: &Inner, st: &St, log: &SpaceLog) -> api::SpaceView {
                 uses: v.uses,
             })
             .collect(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn relay_only_never_opens_ip_sockets() {
+        let key = iroh::SecretKey::generate();
+        let relay_only = Settings {
+            relay_only: true,
+            ..Settings::default()
+        };
+        let ep = bind_with_fallback(&key, &MemoryLookup::new(), &relay_only)
+            .await
+            .unwrap();
+        assert!(ep.bound_sockets().is_empty());
+        ep.close().await;
+
+        // the last-resort fallback only listens on loopback
+        let ep = bind_offline(&key).await.unwrap();
+        let socks = ep.bound_sockets();
+        assert!(!socks.is_empty() && socks.iter().all(|a| a.ip().is_loopback()));
+        assert!(ep.addr().relay_urls().next().is_none());
+        ep.close().await;
+
+        // control: the default setup does open IP sockets, so the checks above mean something
+        let ep = bind_with_fallback(&key, &MemoryLookup::new(), &Settings::default())
+            .await
+            .unwrap();
+        assert!(!ep.bound_sockets().is_empty());
+        ep.close().await;
     }
 }
