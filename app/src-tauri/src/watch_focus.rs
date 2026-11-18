@@ -44,7 +44,11 @@ impl WatchFocus {
 }
 
 #[tauri::command]
-pub fn return_watch_focus(window: WebviewWindow, state: State<'_, WatchFocus>) {
+pub fn return_watch_focus(
+    window: WebviewWindow,
+    state: State<'_, WatchFocus>,
+    user_initiated: bool,
+) {
     let Some(session) = state.0.lock().unwrap().take() else {
         return;
     };
@@ -54,7 +58,7 @@ pub fn return_watch_focus(window: WebviewWindow, state: State<'_, WatchFocus>) {
     };
     let current = unsafe { GetForegroundWindow() };
     // A stream can end after the user already switched apps on their own.
-    if window_identity(current).0 != std::process::id() {
+    if !user_initiated && window_identity(current).0 != std::process::id() {
         return;
     }
     let window = HWND(previous.handle as _);

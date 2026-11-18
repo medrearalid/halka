@@ -83,7 +83,7 @@ export function App() {
       if (!target) {
         useApp.setState({ watchFullscreen: null });
         // Back-to-back shortcuts can enter and exit before React has rendered the fullscreen view.
-        void call("return_watch_focus").catch(() => {});
+        void call("return_watch_focus", { userInitiated: true }).catch(() => {});
         return;
       }
       useApp.getState().select(target.space, target.channel);
@@ -94,7 +94,7 @@ export function App() {
     if (!usesNativeCapture) return;
     const applyFullscreen = async () => {
       if (!fullscreen) {
-        await call("return_watch_focus");
+        await call("return_watch_focus", { userInitiated: false });
         return;
       }
       if (document.fullscreenElement) await document.exitFullscreen();
