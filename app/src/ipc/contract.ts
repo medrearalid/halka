@@ -254,7 +254,7 @@ export interface Events {
   capture_ended: { id: string; error: string | null };
   capture_quick_started: { id: string };
   capture_feedback: { live: boolean };
-  watch_fullscreen: { space: Id; channel: Id; member: Id };
+  watch_fullscreen: { space: Id; channel: Id; member: Id } | null;
 }
 
 export interface CaptureSource {

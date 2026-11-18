@@ -79,29 +79,26 @@ export function App() {
   const fullscreen = useApp((s) => s.watchFullscreen !== null);
   useEffect(() => {
     if (!usesNativeCapture) return;
-    return on("watch_fullscreen", ({ space, channel, member }) => {
-      const app = useApp.getState();
-      if (app.watchFullscreen) {
+    return on("watch_fullscreen", (target) => {
+      if (!target) {
         useApp.setState({ watchFullscreen: null });
+        // Back-to-back shortcuts can enter and exit before React has rendered the fullscreen view.
+        void call("return_watch_focus").catch(() => {});
         return;
       }
-      app.select(space, channel);
-      useApp.setState({ watchFullscreen: member, dialog: null, palette: false });
+      useApp.getState().select(target.space, target.channel);
+      useApp.setState({ watchFullscreen: target.member, dialog: null, palette: false });
     });
   }, []);
   useEffect(() => {
     if (!usesNativeCapture) return;
     const applyFullscreen = async () => {
-      if (fullscreen && document.fullscreenElement) await document.exitFullscreen();
-      if (fullscreen === !!useApp.getState().watchFullscreen) {
-        try {
-          await getCurrentWindow().setFullscreen(fullscreen);
-        } finally {
-          if (!fullscreen && !useApp.getState().watchFullscreen) {
-            await call("return_watch_focus");
-          }
-        }
+      if (!fullscreen) {
+        await call("return_watch_focus");
+        return;
       }
+      if (document.fullscreenElement) await document.exitFullscreen();
+      if (useApp.getState().watchFullscreen) await getCurrentWindow().setFullscreen(true);
     };
     void applyFullscreen().catch(() => {
       if (fullscreen && useApp.getState().watchFullscreen) {

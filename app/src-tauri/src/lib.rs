@@ -559,6 +559,11 @@ pub fn run() {
                         }
                         #[cfg(windows)]
                         if s.key == Code::F10 {
+                            let focus = _app.state::<WatchFocus>();
+                            if focus.is_watching() {
+                                let _ = _app.emit("watch_fullscreen", serde_json::Value::Null);
+                                return;
+                            }
                             let snapshot = hk.snapshot();
                             let Some(voice) = snapshot.voice else { return };
                             let member = snapshot.spaces.iter()
@@ -566,7 +571,7 @@ pub fn run() {
                                 .and_then(|space| space.channels.iter().find(|channel| channel.id == voice.channel))
                                 .and_then(|channel| channel.streams.iter().find(|&&member| member != snapshot.me.id));
                             if let Some(member) = member {
-                                _app.state::<WatchFocus>().remember();
+                                focus.begin();
                                 show_main(_app);
                                 let _ = _app.emit("watch_fullscreen", json!({
                                     "space": voice.space, "channel": voice.channel, "member": member,

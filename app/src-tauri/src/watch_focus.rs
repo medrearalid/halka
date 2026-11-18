@@ -1,5 +1,5 @@
 use std::sync::Mutex;
-use tauri::State;
+use tauri::{State, WebviewWindow};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::{
     GetForegroundWindow, GetWindowThreadProcessId, IsIconic, SW_RESTORE, SetForegroundWindow,
@@ -7,7 +7,11 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 #[derive(Default)]
-pub struct WatchFocus(Mutex<Option<PreviousWindow>>);
+pub struct WatchFocus(Mutex<Option<WatchSession>>);
+
+struct WatchSession {
+    previous: Option<PreviousWindow>,
+}
 
 struct PreviousWindow {
     handle: usize,
@@ -22,23 +26,30 @@ fn window_identity(window: HWND) -> (u32, u32) {
 }
 
 impl WatchFocus {
-    pub fn remember(&self) {
+    pub fn is_watching(&self) -> bool {
+        self.0.lock().unwrap().is_some()
+    }
+
+    pub fn begin(&self) {
         let window = unsafe { GetForegroundWindow() };
         let (process, thread) = window_identity(window);
-        if thread != 0 && process != std::process::id() {
-            // Pressing the shortcut again must not replace the original game window.
-            self.0.lock().unwrap().get_or_insert(PreviousWindow {
+        self.0.lock().unwrap().get_or_insert_with(|| WatchSession {
+            previous: (thread != 0 && process != std::process::id()).then_some(PreviousWindow {
                 handle: window.0 as usize,
                 process,
                 thread,
-            });
-        }
+            }),
+        });
     }
 }
 
 #[tauri::command]
-pub fn return_watch_focus(state: State<'_, WatchFocus>) {
-    let Some(previous) = state.0.lock().unwrap().take() else {
+pub fn return_watch_focus(window: WebviewWindow, state: State<'_, WatchFocus>) {
+    let Some(session) = state.0.lock().unwrap().take() else {
+        return;
+    };
+    let _ = window.set_fullscreen(false);
+    let Some(previous) = session.previous else {
         return;
     };
     let current = unsafe { GetForegroundWindow() };
