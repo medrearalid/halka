@@ -2,6 +2,12 @@
 
 Her sürüm `## <sürüm>` başlığıyla başlar. Maddeler kullanıcıya dönük ve Türkçedir; uygulamadaki "Neler değişti" kartı ve GitHub sürüm sayfası bu dosyadan beslenir.
 
+## 0.1.5
+
+- Karşılama ekranındaki kalabalık ekrana eşit dağılıyor; hareketler sade ve akıcı, yüzler artık bozulmuyor.
+- Kurulum açık temada; kurulum klasörünü seçebiliyorsun.
+- Arka planda güncelleme denetimi başarısız olursa artık başlık çubuğunda hata görünmüyor, kısa süre sonra yeniden deneniyor.
+
 ## 0.1.4
 
 - Ekran paylaşımı artık Halka panelinden başlıyor; Windows yayın kısayolları eklendi.
