@@ -39,7 +39,7 @@ export function topRole(space: SpaceView, m: MemberView): RoleView | undefined {
   let best: RoleView | undefined;
   for (const rid of m.roles) {
     const role = space.roles.find((x) => x.id === rid);
-    if (role && (!best || role.rank > best.rank)) best = role;
+    if (role && (!best || role.rank > best.rank || (role.rank === best.rank && role.id < best.id))) best = role;
   }
   return best;
 }

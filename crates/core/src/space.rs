@@ -8,6 +8,7 @@
 //! member from "backdating" ops onto an old fork of the DAG. Because voiding can change which
 //! revocations are valid, replay iterates to a fixpoint.
 
+use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use anyhow::{Result, bail, ensure};
@@ -295,6 +296,19 @@ impl State {
                     rank,
                 };
             }
+            OpBody::MoveRole { role, target } => {
+                ensure!(
+                    a == &self.owner,
+                    "rol sırasını yalnızca kurucu değiştirebilir"
+                );
+                let (mut ids, from, to) = self.role_move(role, target)?;
+                let moved = ids.remove(from);
+                ids.insert(to, moved);
+                let count = ids.len() as u32;
+                for (index, id) in ids.iter().enumerate() {
+                    self.roles.get_mut(id).expect("checked").rank = count - index as u32;
+                }
+            }
             OpBody::DeleteRole { role } => {
                 self.need(a, Perms::MANAGE_ROLES)?;
                 ensure!(*role != self.id, "herkes rolü silinemez");
@@ -445,6 +459,26 @@ impl State {
         }
         Ok(())
     }
+
+    fn role_move(&self, role: &Id, target: &Id) -> Result<(Vec<Id>, usize, usize)> {
+        ensure!(role != target, "farklı bir rol seç");
+        let mut ids: Vec<_> = self
+            .roles
+            .keys()
+            .copied()
+            .filter(|id| *id != self.id)
+            .collect();
+        ids.sort_by_key(|id| (Reverse(self.roles[id].rank), *id));
+        let from = ids
+            .iter()
+            .position(|id| id == role)
+            .ok_or_else(|| anyhow::anyhow!("rol yok"))?;
+        let to = ids
+            .iter()
+            .position(|id| id == target)
+            .ok_or_else(|| anyhow::anyhow!("hedef rol yok"))?;
+        Ok((ids, from, to))
+    }
 }
 
 fn removal_target(op: &Op) -> Option<Id> {
@@ -487,6 +521,11 @@ fn revoked_candidates(st: &State, op: &Op) -> Vec<Id> {
             .map(|_| vec![*member])
             .unwrap_or_default(),
         OpBody::DeleteRole { role } => holders(role),
+        OpBody::MoveRole { role, target } => match st.role_move(role, target) {
+            Ok((_, from, to)) if from < to => holders(role),
+            Ok((ids, from, to)) => ids[to..from].iter().flat_map(holders).collect(),
+            Err(_) => vec![],
+        },
         OpBody::UpdateRole {
             role, perms, rank, ..
         } => match st.roles.get(role) {
@@ -979,6 +1018,56 @@ mod tests {
         log.insert_many([f]);
         assert!(log.rejected.contains(&fid));
         assert!(!log.state.invites.contains_key(&idk(&inv)));
+    }
+
+    #[test]
+    fn owner_can_move_roles_with_tied_ranks() {
+        let (owner, member, mut log) = setup();
+        let mut create = |name: &str, rank| {
+            log.author(
+                &owner,
+                OpBody::CreateRole {
+                    name: name.into(),
+                    color: 0,
+                    perms: Perms::ADMIN,
+                    rank,
+                },
+            )
+            .unwrap()
+            .id()
+        };
+        let high = create("high", 5);
+        let tied = create("tied", 5);
+        let low = create("low", 1);
+        log.author(
+            &owner,
+            OpBody::AssignRole {
+                member: idk(&member),
+                role: high,
+                on: true,
+            },
+        )
+        .unwrap();
+        let move_low = OpBody::MoveRole {
+            role: low,
+            target: high.min(tied),
+        };
+        assert!(log.author(&member, move_low.clone()).is_err());
+        assert!(
+            log.author(
+                &owner,
+                OpBody::MoveRole {
+                    role: low,
+                    target: log.id,
+                },
+            )
+            .is_err()
+        );
+        log.author(&owner, move_low).unwrap();
+        assert_eq!(log.state.roles[&low].rank, 3);
+        assert_eq!(log.state.roles[&high.min(tied)].rank, 2);
+        assert_eq!(log.state.roles[&high.max(tied)].rank, 1);
+        assert_eq!(log.state.roles[&log.id].rank, 0);
     }
 
     #[test]

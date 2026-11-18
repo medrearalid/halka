@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { Copy, Pencil, ShieldCheck } from "lucide-react";
 import { call, type Id, type Me, type ProfileView } from "@/ipc";
 import { copy } from "@/lib/actions";
 import { DEFAULT_ORB, encodePhoto, MAX_BIO, preparePhoto, profileColor } from "@/lib/profile";
 import { memberOf } from "@/lib/space";
+import { cn } from "@/lib/utils";
 import { useApp } from "@/state/store";
 import { Button } from "@/components/ui/button";
 import { DialogTitle } from "@/components/ui/dialog";
@@ -11,7 +12,12 @@ import { Field } from "./common";
 import { useSubmit } from "./forms";
 import { OrbAvatar } from "./OrbAvatar";
 
-export function ProfilePanel({ member, space }: { member: Id; space: Id | null }) {
+export function ProfilePanel({ member, space, compact = false, children }: {
+  member: Id;
+  space: Id | null;
+  compact?: boolean;
+  children?: ReactNode;
+}) {
   const me = useApp((s) => s.snap!.me);
   const online = useApp((s) => s.snap!.online);
   const context = useApp((s) => s.snap!.spaces.find((item) => item.id === space));
@@ -21,23 +27,27 @@ export function ProfilePanel({ member, space }: { member: Id; space: Id | null }
   const self = me.id === member;
   const peer = memberOf(context, member);
   const person = self ? me : peer;
-  if (!person) return <DialogTitle className="p-6 text-sm">Profil artık görünmüyor</DialogTitle>;
+  const Title = compact ? "h2" : DialogTitle;
+  if (!person) return <Title className="p-6 text-sm">Profil artık görünmüyor</Title>;
 
   const roles = context?.roles.filter((role) => peer?.roles.includes(role.id)) ?? [];
   return (
-    <div className="max-h-[min(680px,calc(100dvh-48px))] overflow-y-auto overscroll-contain">
+    <div className={cn(
+      "overflow-y-auto overscroll-contain",
+      compact ? "max-h-[min(680px,var(--radix-popover-content-available-height))]" : "max-h-[min(680px,calc(100dvh-48px))]",
+    )}>
       {self && editing ? (
-        <ProfileEditor me={me} profile={profile} onDone={() => {
+        <ProfileEditor me={me} profile={profile} compact={compact} onDone={() => {
           setEditing(false);
           requestAnimationFrame(() => editButton.current?.focus());
         }} />
       ) : (
         <>
-          <div className="flex min-w-0 items-center gap-5 border-b border-line bg-paper-2 px-6 py-6">
-            <OrbAvatar id={member} name={person.name} size={54} />
+          <div className={cn("flex min-w-0 items-center border-b border-line bg-paper-2", compact ? "gap-3 px-4 py-3" : "gap-5 px-6 py-6")}>
+            <OrbAvatar id={member} name={person.name} size={compact ? 40 : 54} />
             <div className="min-w-0 flex-1">
               {self && <p className="mb-1 text-xs text-ink-3">Profilim</p>}
-              <DialogTitle className="pr-4 text-[20px] leading-tight font-semibold wrap-anywhere">{person.name}</DialogTitle>
+              <Title className={cn("leading-tight font-semibold wrap-anywhere", compact ? "text-base" : "pr-4 text-[20px]")}>{person.name}</Title>
               <p className="mt-1 flex items-center gap-1.5 text-xs text-ink-2">
                 <span aria-hidden className={`size-1.5 rounded-full ${(self ? online : peer?.online) ? "bg-live" : "bg-ink-3"}`} />
                 {(self ? online : peer?.online) ? "Çevrimiçi" : "Çevrimdışı"}
@@ -49,7 +59,7 @@ export function ProfilePanel({ member, space }: { member: Id; space: Id | null }
               </Button>
             )}
           </div>
-          <div className="space-y-4 px-6 py-4">
+          <div className={compact ? "space-y-3 px-4 py-3" : "space-y-4 px-6 py-4"}>
             {profile?.bio && (
               <section>
                 <h2 className="mb-1 text-xs font-semibold">Hakkında</h2>
@@ -81,6 +91,7 @@ export function ProfilePanel({ member, space }: { member: Id; space: Id | null }
               </div>
               <p className="mt-1 text-xs text-ink-3">Kimliği doğrulamak için kodu karşılaştır.</p>
             </details>
+            {children}
           </div>
         </>
       )}
@@ -88,7 +99,12 @@ export function ProfilePanel({ member, space }: { member: Id; space: Id | null }
   );
 }
 
-function ProfileEditor({ me, profile, onDone }: { me: Me; profile?: ProfileView; onDone: () => void }) {
+function ProfileEditor({ me, profile, compact, onDone }: {
+  me: Me;
+  profile?: ProfileView;
+  compact: boolean;
+  onDone: () => void;
+}) {
   const [name, setName] = useState(me.name);
   const [bio, setBio] = useState(profile?.bio ?? "");
   const [color, setColor] = useState(profile?.orb_color ?? DEFAULT_ORB);
@@ -128,12 +144,13 @@ function ProfileEditor({ me, profile, onDone }: { me: Me; profile?: ProfileView;
 
   const dirty = name.trim() !== me.name || bio.trim() !== (profile?.bio ?? "") || color !== (profile?.orb_color ?? DEFAULT_ORB) || photo !== undefined;
   const hasPhoto = photo === undefined ? !!profile?.photo : !!photo;
+  const Title = compact ? "h2" : DialogTitle;
   return (
     <form className="space-y-4 p-6" onSubmit={(event) => {
       event.preventDefault();
       if (dirty && name.trim() && !photoBusy) void save.run();
     }}>
-      <DialogTitle className="text-lg font-semibold">Profili düzenle</DialogTitle>
+      <Title className="text-lg font-semibold">Profili düzenle</Title>
       <fieldset disabled={save.busy} className="space-y-4">
         <div className="flex min-w-0 items-center gap-5 rounded-md border bg-paper-2 p-4">
           <OrbAvatar id={me.id} name={name.trim() || me.name} size={56} color={color} photoSrc={photo ? photoUrl ?? null : photo} />

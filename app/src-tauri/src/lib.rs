@@ -182,6 +182,13 @@ fn update_role(
 }
 
 #[tauri::command(async)]
+fn move_role(n: State<Node>, space: Id, role: Id, target: Id) -> R<()> {
+    n.op(space, OpBody::MoveRole { role, target })
+        .map(|_| ())
+        .map_err(e)
+}
+
+#[tauri::command(async)]
 fn delete_role(n: State<Node>, space: Id, role: Id) -> R<()> {
     n.op(space, OpBody::DeleteRole { role })
         .map(|_| ())
@@ -551,6 +558,7 @@ pub fn run() {
             delete_channel,
             create_role,
             update_role,
+            move_role,
             delete_role,
             assign_role,
             kick,

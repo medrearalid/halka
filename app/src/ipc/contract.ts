@@ -187,6 +187,7 @@ export interface Commands {
     args: { space: Id; role: Id; name: string; color: number; perms: Perm[]; rank: number };
     ret: void;
   };
+  move_role: { args: { space: Id; role: Id; target: Id }; ret: void };
   delete_role: { args: { space: Id; role: Id }; ret: void };
   assign_role: { args: { space: Id; member: Id; role: Id; on: boolean }; ret: void };
   kick: { args: { space: Id; member: Id }; ret: void };

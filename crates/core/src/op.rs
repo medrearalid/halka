@@ -91,6 +91,10 @@ pub enum OpBody {
         on: bool,
     },
     Leave,
+    MoveRole {
+        role: Id,
+        target: Id,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

@@ -14,6 +14,7 @@ import type {
   SpaceView,
 } from "./contract";
 import { runEncoder, type EncodeLoop } from "@/media/encoder";
+import { moveRole } from "@/lib/roleOrder";
 
 const ALL_PERMS: Perm[] = ["admin", "manage_space", "manage_channels", "manage_roles", "manage_messages", "kick", "ban", "invite", "send", "speak", "stream"];
 // shortcut: assumes an implicit "everyone" baseline of send/speak/stream; the core decides the real baseline.
@@ -500,6 +501,14 @@ export function createMockBackend(): Backend {
       const r = s.roles.find((x) => x.id === role);
       if (!r) throw "Rol bulunamadı";
       Object.assign(r, { name, color, perms, rank });
+      changed();
+    },
+    move_role: ({ space, role, target }) => {
+      const s = sp(space);
+      if (s.owner !== me.id) throw "Rol sırasını yalnızca kurucu değiştirebilir";
+      const roles = moveRole(s.roles, space, role, target);
+      if (!roles) throw "Geçersiz rol sırası";
+      s.roles = roles;
       changed();
     },
     delete_role: ({ space, role }) => {
