@@ -2,6 +2,15 @@
 
 Her sürüm `## <sürüm>` başlığıyla başlar. Maddeler kullanıcıya dönük ve Türkçedir; uygulamadaki "Neler değişti" kartı ve GitHub sürüm sayfası bu dosyadan beslenir.
 
+## 0.1.6
+
+- Halka oluştururken "Relay şart" seçebilirsin: üyeler yalnızca relay üzerinden bağlanır, IP adresleri birbirinden gizli kalır.
+- Kurucu relay şartını sonradan da açabilir; böyle halkaların adının yanında kalkan simgesi görünür.
+- Relay'i açınca uygulama hemen yeniden başlıyor ve kaldığın yere dönüyor.
+- Kurucu halkayı bütün üyeler için silebilir.
+- "Halkayı yönet" artık uygulama ayarlarından ayrı; yeni Bağlantı ve Üyeler sekmeleriyle halkayı ayrıntılı yönetebilirsin.
+- Relay ile doğrudan bağlantının farkı sade bir dille anlatılıyor.
+
 ## 0.1.5
 
 - Karşılama ekranındaki kalabalık ekrana eşit dağılıyor; hareketler sade ve akıcı, yüzler artık bozulmuyor.
