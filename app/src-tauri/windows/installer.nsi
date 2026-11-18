@@ -1,5 +1,5 @@
 ; Halka installer: Tauri's NSIS template (tauri-cli v2.12.5, crates/tauri-bundler/src/bundle/windows/nsis/installer.nsi)
-; with a dark, single-screen first install. Every Halka change is marked "Halka:"; keep the rest identical to
+; with a light, Halka-themed first install. Every Halka change is marked "Halka:"; keep the rest identical to
 ; upstream so updater flags (/UPDATE /P /S /R), hooks, WebView2 bootstrap and the uninstaller behave the same.
 ; When bumping the pinned tauri-cli, re-copy upstream and re-apply the marked blocks.
 
@@ -170,9 +170,9 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 !define MUI_LANGDLL_REGISTRY_KEY "${MANUPRODUCTKEY}"
 !define MUI_LANGDLL_REGISTRY_VALUENAME "Installer Language"
 
-; Halka: graphite background for the welcome page and header, warm ink text (DESIGN.md "Kurulum ve güncelleme")
-!define MUI_BGCOLOR 0D0F12
-!define MUI_TEXTCOLOR EDEAE4
+; Halka: light theme (app/src/index.css light tokens: paper-1 FBFAF8, ink-1 1A1814), DESIGN.md "Kurulum ve güncelleme"
+!define MUI_BGCOLOR FBFAF8
+!define MUI_TEXTCOLOR 1A1814
 !define MUI_CUSTOMFUNCTION_GUIINIT HalkaGuiInit
 !define MUI_INSTFILESPAGE_PROGRESSBAR smooth
 !define /ifndef PBM_SETBARCOLOR 0x0409
@@ -181,7 +181,7 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 ; Installer pages, must be ordered as they appear
 ; 1. Welcome Page
 !define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
-!define MUI_PAGE_CUSTOMFUNCTION_SHOW HalkaWelcomeShow
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW HalkaChrome
 !define MUI_WELCOMEPAGE_TITLE "$(halkaTitle)"
 !define MUI_WELCOMEPAGE_TEXT "$(halkaText)"
 !insertmacro MUI_PAGE_WELCOME
@@ -427,7 +427,11 @@ Function PageLeaveReinstall
   reinst_done:
 FunctionEnd
 
-; 5. Halka: no directory page
+; 5. Choose install directory page
+!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW HalkaDirectoryShow ; Halka
+!define MUI_DIRECTORYPAGE_TEXT_TOP "$(halkaDirText)" ; Halka
+!insertmacro MUI_PAGE_DIRECTORY
 
 ; 6. Start menu shortcut page
 Var AppStartMenuFolder
@@ -468,22 +472,40 @@ ShowInstDetails nevershow
 
 ; MUI re-shows its chrome on every page, so this runs from each page's show callback
 Function HalkaChrome
-  SetCtlColors $HWNDPARENT EDEAE4 0D0F12
-  !insertmacro HalkaHide 1028 ; branding text
+  SetCtlColors $HWNDPARENT 1A1814 FBFAF8
+  ; branding line carries the copyright ("© 2026 Guney") in ink-3
+  GetDlgItem $0 $HWNDPARENT 1028
+  SetCtlColors $0 78746F FBFAF8
   !insertmacro HalkaHide 1256 ; branding text shadow
   !insertmacro HalkaHide 1035 ; separators
   !insertmacro HalkaHide 1036
   !insertmacro HalkaHide 1045
+  GetDlgItem $0 $HWNDPARENT 1037 ; page header title / subtitle
+  SetCtlColors $0 1A1814 FBFAF8
+  GetDlgItem $0 $HWNDPARENT 1038
+  SetCtlColors $0 504C48 FBFAF8
 FunctionEnd
+
+!macro HalkaInner ID COLOR
+  GetDlgItem $1 $0 ${ID}
+  SetCtlColors $1 ${COLOR} FBFAF8
+!macroend
 
 Function HalkaGuiInit
   Call HalkaChrome
 FunctionEnd
 
-Function HalkaWelcomeShow
+Function HalkaDirectoryShow
   Call HalkaChrome
+  ; the (skipped) start menu page sits in between, so MUI labels this button "Next"; it is really the last step
   GetDlgItem $0 $HWNDPARENT 1
-  SendMessage $0 ${WM_SETTEXT} 0 "STR:$(halkaInstall)"
+  SendMessage $0 ${WM_SETTEXT} 0 "STR:$(^InstallBtn)"
+  FindWindow $0 "#32770" "" $HWNDPARENT
+  SetCtlColors $0 1A1814 FBFAF8
+  !insertmacro HalkaInner 1006 504C48 ; explanation
+  !insertmacro HalkaInner 1020 1A1814 ; "destination folder" group
+  !insertmacro HalkaInner 1023 78746F ; space required
+  !insertmacro HalkaInner 1024 78746F ; space available
 FunctionEnd
 
 Function HalkaInstFilesShow
@@ -491,18 +513,13 @@ Function HalkaInstFilesShow
   !insertmacro HalkaHide 3 ; Back
   !insertmacro HalkaHide 1 ; Next: the page closes itself when done
   FindWindow $0 "#32770" "" $HWNDPARENT
-  SetCtlColors $0 EDEAE4 0D0F12
-  GetDlgItem $1 $0 1006
-  SetCtlColors $1 A39E95 0D0F12
+  SetCtlColors $0 1A1814 FBFAF8
+  !insertmacro HalkaInner 1006 504C48
   GetDlgItem $1 $0 1004
   ; visual styles ignore bar colours, so drop the theme on this one control (COLORREF is 0x00BBGGRR)
   System::Call 'uxtheme::SetWindowTheme(p r1, w " ", w " ")'
-  SendMessage $1 ${PBM_SETBARCOLOR} 0 0x003BA2E9
-  SendMessage $1 ${PBM_SETBKCOLOR} 0 0x001E1A17
-  GetDlgItem $1 $HWNDPARENT 1037
-  SetCtlColors $1 EDEAE4 0D0F12
-  GetDlgItem $1 $HWNDPARENT 1038
-  SetCtlColors $1 A39E95 0D0F12
+  SendMessage $1 ${PBM_SETBARCOLOR} 0 0x002C67BB ; --copper BB672C
+  SendMessage $1 ${PBM_SETBKCOLOR} 0 0x00DCE1E4 ; --paper-4 E4E1DC
 FunctionEnd
 
 Function HalkaFinish
@@ -574,15 +591,15 @@ LangString choowHowToInstall 0 ""
 {{/each}}
 !insertmacro MUI_RESERVEFILE_LANGDLL
 
-; Halka: copy for the single screen
-LangString halkaTitle ${LANG_TURKISH} "Halka"
-LangString halkaText ${LANG_TURKISH} "Arkadaşlarınla sunucu olmadan, uçtan uca şifreli konuş, yaz ve ekranını paylaş.$\r$\n$\r$\nKurulum birkaç saniye sürer; bitince Halka kendiliğinden açılır."
-LangString halkaInstall ${LANG_TURKISH} "Kur"
+; Halka: installer copy
+LangString halkaTitle ${LANG_TURKISH} "Halka'yı kur"
+LangString halkaText ${LANG_TURKISH} "Arkadaşlarınla sunucu olmadan, uçtan uca şifreli konuş, yaz ve ekranını paylaş.$\r$\n$\r$\nSonraki adımda kurulum klasörünü seçebilirsin. Kurulum bitince Halka kendiliğinden açılır.$\r$\n$\r$\nGeliştiren: Guney"
+LangString halkaDirText ${LANG_TURKISH} "Halka bu klasöre kurulacak. Başka bir yer seçmek için Gözat'a bas, hazırsan Kur'a bas."
 LangString halkaInstalling ${LANG_TURKISH} "Halka kuruluyor"
 LangString halkaInstallingSub ${LANG_TURKISH} "Birkaç saniye sürer."
-LangString halkaTitle ${LANG_ENGLISH} "Halka"
-LangString halkaText ${LANG_ENGLISH} "Talk, text and share your screen with friends, end-to-end encrypted and without a server.$\r$\n$\r$\nSetup takes a few seconds; Halka opens when it is done."
-LangString halkaInstall ${LANG_ENGLISH} "Install"
+LangString halkaTitle ${LANG_ENGLISH} "Install Halka"
+LangString halkaText ${LANG_ENGLISH} "Talk, text and share your screen with friends, end-to-end encrypted and without a server.$\r$\n$\r$\nYou can pick the install folder next. Halka opens when setup is done.$\r$\n$\r$\nDeveloped by Guney"
+LangString halkaDirText ${LANG_ENGLISH} "Halka will be installed in this folder. Choose Browse to pick another one, or Install when ready."
 LangString halkaInstalling ${LANG_ENGLISH} "Installing Halka"
 LangString halkaInstallingSub ${LANG_ENGLISH} "This takes a few seconds."
 {{#each language_files}}

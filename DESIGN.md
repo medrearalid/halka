@@ -52,6 +52,6 @@ glassdock'un imzası: üst kenarda 1px specular parlama, iki tonlu ince kenar (�
 - **Süreler:** 150 ms (`--dur-1`) ve 200 ms (`--dur-2`). Easing için `--ease-out` kullanılır; zıplama yok.
 
 ## Kurulum ve güncelleme
-- **Installer:** Sihirbaz yok, tek ekran. Zemin grafit `--paper-0` (#0d0f12). Ortada halka işareti ve "Halka" yazısı, altında tek satır durum metni ve ince ilerleme çubuğu bulunur. Tek düğme "Kur"dur. Kurulum bitince uygulama kendiliğinden açılır. Güncellemeler bu ekranı göstermez, sessiz kurulur.
+- **Installer:** Açık tema (açık `--paper-1` zemin, `--ink-1` metin, bakır ilerleme). Karşılama sayfasında solda uygulama simgesi, "Halka" yazısı ve geliştirici adı (Guney); sağda tek paragraf tanıtım. Ardından kurulum klasörü seçimi ve ilerleme sayfası gelir; bitiş sayfası yoktur, kurulum bitince uygulama kendiliğinden açılır. Alt satırda telif (© Guney) durur. Güncellemeler bu ekranları göstermez, sessiz kurulur.
 - **Güncelleme hapı:** Başlık çubuğunda, pencere kontrollerinin solunda `rounded-full`, 11px bir hap. Boştayken hiç yer kaplamaz. İndirirken `tabular-nums` yüzde ve 1px bakır ilerleme çizgisi gösterir. Hazır olduğunda "Yeniden başlat" bakır renkli birincil eylemdir. Hatada `--danger` noktası ve "Tekrar dene" bulunur.
 - **Neler değişti:** Güncellemeden sonraki ilk açılışta başlık çubuğunun altında, sağ üstte yüzen `.glass` bir kart çıkar. Kartta sürüm başlığı, en fazla altı madde ve tek bir "Tamam" düğmesi bulunur. Notlar `CHANGELOG.md`'den gelir; yalnızca kullanıcıya dönük Türkçe maddeler yazılır.

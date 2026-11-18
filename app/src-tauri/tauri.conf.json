@@ -41,6 +41,8 @@
       "icons/128x128@2x.png",
       "icons/icon.ico"
     ],
+    "publisher": "Guney",
+    "copyright": "© 2026 Guney",
     "shortDescription": "Sunucusuz sesli sohbet",
     "longDescription": "Arkadaşlarınla sunucu olmadan, doğrudan ve uçtan uca şifreli konuş, yaz ve ekran paylaş.",
     "windows": {
