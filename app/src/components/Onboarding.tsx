@@ -1,94 +1,119 @@
-import { useState } from "react";
-import { ArrowLeft, Plus, Ticket } from "lucide-react";
-import { call } from "@/ipc";
+import { useEffect, useRef, useState } from "react";
+import { ArrowLeft, ArrowRight, ChevronRight, Pencil, Plus, Shield, ShieldCheck, Ticket, Volume2, VolumeX } from "lucide-react";
+import { call, type Id } from "@/ipc";
 import { useApp } from "@/state/store";
+import { playStatusSound } from "@/lib/statusSounds";
 import { Button } from "@/components/ui/button";
 import { RingMark } from "./common";
 import { CreateSpaceForm, JoinForm, useSubmit } from "./forms";
+import { WelcomeCrowd } from "./WelcomeCrowd";
+import "./welcome.css";
+
+function Signature() {
+  const [text, setText] = useState("HALKA");
+  const timer = useRef(0);
+  useEffect(() => {
+    const reset = () => { clearInterval(timer.current); setText("HALKA"); };
+    document.addEventListener("visibilitychange", reset);
+    return () => { clearInterval(timer.current); document.removeEventListener("visibilitychange", reset); };
+  }, []);
+  function scramble() {
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    clearInterval(timer.current);
+    const frames = ["∩Λ⋮Κ∆", "HΛ∥Κ∆", "HA∟Κ∆", "HALK∆", "HALKA"];
+    let i = 0;
+    setText(frames[i]);
+    timer.current = window.setInterval(() => {
+      setText(frames[++i]);
+      if (i === frames.length - 1) clearInterval(timer.current);
+    }, 48);
+  }
+  return <span className="welcome-sign" onPointerEnter={scramble}>
+    <RingMark size={24} className="text-copper" /><span className="sr-only">Halka</span><span aria-hidden>{text}</span>
+  </span>;
+}
+
+function PrivacyStatus() {
+  const active = useApp((s) => s.snap!.active_relay_only);
+  const requested = useApp((s) => s.snap!.settings.relay_only);
+  const { busy, error, run } = useSubmit(() => call("set_settings", {
+    settings: { ...useApp.getState().snap!.settings, relay_only: true },
+  }));
+  const Icon = active ? ShieldCheck : Shield;
+  return <div className="welcome-privacy">
+    <Icon className={active ? "text-live" : "text-ink-2"} size={17} />
+    <div aria-live="polite">
+      <div>{active ? "IP eşlerden gizli" : "Doğrudan bağlantıya izin veriliyor"}</div>
+      {active !== requested && <small className="text-warn">Yeniden başlatınca uygulanacak</small>}
+      {error && <small className="block text-danger">{error}</small>}
+    </div>
+    {!active && !requested && <Button variant="outline" disabled={busy} onClick={() => void run()}>IP’mi gizle</Button>}
+  </div>;
+}
+
+function NameForm({ initial, done, cancel }: { initial: string; done(): void; cancel?: () => void }) {
+  const [name, setName] = useState(initial);
+  const { busy, error, run } = useSubmit(() => call("set_name", { name: name.trim() }), done);
+  return <form className="grid max-w-sm gap-2" onSubmit={(event) => { event.preventDefault(); if (name.trim()) void run(); }}>
+    <label htmlFor="welcome-name" className="text-sm text-ink-2">Arkadaşların seni nasıl görsün?</label>
+    <input id="welcome-name" className="field" autoFocus maxLength={32} placeholder="Adın" value={name} onChange={(e) => setName(e.target.value)} />
+    {error && <p role="alert" className="text-danger">{error}</p>}
+    <div className="flex gap-2"><Button disabled={busy || !name.trim()}>{initial ? "Kaydet" : "Devam"} <ArrowRight /></Button>
+      {cancel && <Button type="button" variant="ghost" onClick={cancel}>Vazgeç</Button>}</div>
+  </form>;
+}
 
 export function Onboarding() {
-  const me = useApp((s) => s.snap!.me);
+  const { me, spaces } = useApp((s) => s.snap!);
+  const lastId = useApp((s) => s.space);
+  const sounds = useApp((s) => s.statusSounds);
+  const [step, setStep] = useState<"choose" | "name" | "create" | "join">("choose");
   const needsName = !me.name.trim() || me.name === "Anonim";
-  const [step, setStep] = useState<"choose" | "create" | "join">("choose");
-
-  return (
-    <div className="relative grid h-full place-items-center overflow-auto bg-paper-0 px-4">
-      <svg className="pointer-events-none absolute top-1/2 left-1/2 size-[640px] -translate-x-1/2 -translate-y-1/2 max-[700px]:hidden" viewBox="0 0 640 640" aria-hidden>
-        <circle cx="320" cy="320" r="300" fill="none" stroke="var(--ring-line)" />
-        <circle cx="320" cy="320" r="288" fill="none" stroke="var(--ring-line)" strokeDasharray="1 9" />
-        {[0, 1, 2, 3, 4].map((i) => {
-          const t = (2 * Math.PI * i) / 5;
-          return <circle key={i} cx={320 - Math.sin(t) * 300} cy={320 + Math.cos(t) * 300} r={i === 0 ? 5 : 3.5} fill={i === 0 ? "var(--copper)" : "var(--line-2)"} />;
-        })}
-      </svg>
-      <div key={needsName ? "name" : step} className="enter relative flex w-full max-w-[340px] flex-col gap-6 py-10">
-        <div className="flex flex-col gap-3">
-          <RingMark size={30} className="text-copper" />
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight">{needsName ? "Halka’ya hoş geldin" : `Merhaba ${me.name}`}</h1>
-            <p className="mt-1 text-[13px] text-ink-2">Sunucu yok. Konuşmaların doğrudan arkadaşlarınla aranda.</p>
-          </div>
-        </div>
-
-        {needsName ? (
-          <NameStep />
-        ) : step === "choose" ? (
-          <div className="flex flex-col gap-2">
-            <Choice icon={<Plus className="size-4" />} title="Yeni halka oluştur" body="Arkadaşlarını davet edeceğin yeni bir alan." onClick={() => setStep("create")} />
-            <Choice icon={<Ticket className="size-4" />} title="Davet koduyla katıl" body="Biri sana halka:… ile başlayan bir kod verdiyse." onClick={() => setStep("join")} />
-          </div>
-        ) : (
-          <div className="flex flex-col gap-3">
-            <button onClick={() => setStep("choose")} className="flex w-fit items-center gap-1 text-xs text-ink-3 hover:text-ink-1">
-              <ArrowLeft className="size-3" /> Geri
-            </button>
-            <div className="text-[13px] font-medium">{step === "create" ? "Yeni halka oluştur" : "Davet koduyla katıl"}</div>
-            {step === "create" ? <CreateSpaceForm autoFocus /> : <JoinForm autoFocus />}
-          </div>
-        )}
-
-        <p className="text-2xs text-ink-3">
-          Güvenlik kodun <span className="font-mono text-ink-2">{me.code}</span>
-        </p>
-      </div>
+  const last = spaces.find((space) => space.id === lastId);
+  const others = spaces.filter((space) => space !== last);
+  const cue = () => { if (useApp.getState().statusSounds) void playStatusSound("join"); };
+  function enter(id: Id) {
+    cue();
+    useApp.getState().select(id);
+  }
+  return <main className="welcome">
+    <div className="welcome-scenery" aria-hidden="true">
+      <div className="welcome-orbit" />
+      <WelcomeCrowd />
     </div>
-  );
-}
-
-function NameStep() {
-  const [name, setName] = useState("");
-  const { busy, error, run } = useSubmit(() => call("set_name", { name: name.trim() }));
-  return (
-    <form
-      className="flex flex-col gap-2"
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (name.trim()) void run();
-      }}
-    >
-      <label className="text-xs font-medium text-ink-2" htmlFor="ob-name">
-        Arkadaşların seni nasıl görsün?
-      </label>
-      <input id="ob-name" className="field h-8" placeholder="Adın" value={name} maxLength={32} autoFocus onChange={(e) => setName(e.target.value)} />
-      {error && <p className="text-xs text-danger">{error}</p>}
-      <Button type="submit" size="lg" disabled={!name.trim()} aria-busy={busy}>
-        Devam
-      </Button>
-    </form>
-  );
-}
-
-function Choice({ icon, title, body, onClick }: { icon: React.ReactNode; title: string; body: string; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className="group flex items-start gap-3 rounded-lg border border-line-2 bg-paper-1 p-3 text-left transition-colors duration-150 hover:border-copper/50 hover:bg-paper-2"
-    >
-      <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-md bg-paper-3 text-ink-2 transition-colors group-hover:text-copper">{icon}</span>
-      <span>
-        <span className="block text-[13px] font-medium tracking-tight">{title}</span>
-        <span className="block text-xs text-ink-3">{body}</span>
-      </span>
-    </button>
-  );
+    <div className="welcome-scroll">
+      <header className="welcome-tools"><PrivacyStatus />
+        <Button variant="ghost" size="icon-lg" aria-label="Durum sesleri" title={sounds ? "Durum seslerini kapat" : "Durum seslerini aç"}
+          aria-pressed={sounds} onClick={() => useApp.getState().setStatusSounds(!sounds)}>{sounds ? <Volume2 /> : <VolumeX />}</Button>
+      </header>
+      <section className="welcome-content">
+        <Signature />
+        <h1>{needsName ? "Halka’ya hoş geldin" : <>Merhaba, <strong>{me.name}</strong>
+          <Button className="welcome-edit" variant="ghost" size="icon" aria-label="Adını düzenle" onClick={() => setStep("name")}><Pencil /></Button></>}</h1>
+        <div className="welcome-actions enter" key={needsName ? "first" : step}>
+          {needsName || step === "name" ? <NameForm initial={needsName ? "" : me.name} done={() => setStep("choose")} cancel={needsName ? undefined : () => setStep("choose")} />
+          : step !== "choose" ? <div className="grid max-w-sm gap-3">
+            <Button variant="ghost" size="sm" className="w-fit" onClick={() => setStep("choose")}><ArrowLeft /> Geri</Button>
+            <h2 className="text-lg font-medium">{step === "create" ? "Halka oluştur" : "Davetle katıl"}</h2>
+            {step === "create" ? <CreateSpaceForm autoFocus onDone={cue} /> : <JoinForm autoFocus onDone={cue} />}
+          </div> : <>
+            {last && <div className="welcome-last">
+              <div className="min-w-0"><h2 className="welcome-label">Son halkan</h2><p className="truncate text-2xl font-medium tracking-tight">{last.name}</p></div>
+              <Button size="lg" onClick={() => enter(last.id)}>Devam et <ArrowRight /></Button>
+            </div>}
+            {others.length > 0 && <div className="welcome-list">
+              <h2 className="welcome-label">{last ? "Diğer halkaların" : "Halkaların"}</h2>
+              <ul>{others.map((space) => <li key={space.id}><button onClick={() => enter(space.id)}>
+                <RingMark size={15} /><span className="truncate">{space.name}</span><ChevronRight size={14} className="ml-auto" />
+              </button></li>)}</ul>
+            </div>}
+            <div className="flex flex-wrap gap-2">
+              <Button size="lg" variant={spaces.length ? "outline" : "default"} onClick={() => setStep("create")}><Plus /> Halka oluştur</Button>
+              <Button size="lg" variant="outline" onClick={() => setStep("join")}><Ticket /> Davetle katıl</Button>
+            </div>
+          </>}
+        </div>
+      </section>
+    </div>
+  </main>;
 }

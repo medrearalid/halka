@@ -27,6 +27,7 @@ interface Persisted {
 }
 
 interface AppState extends Persisted {
+  welcome: boolean;
   snap: Snapshot | null;
   bootError: string | null;
   channel: Id | null;
@@ -77,6 +78,7 @@ function mergeMessages(a: MessageView[], b: MessageView[]): MessageView[] {
 
 export const useApp = create<AppState>()((set, get) => ({
   ...readPersisted(),
+  welcome: true,
   snap: null,
   bootError: null,
   channel: null,
@@ -92,7 +94,7 @@ export const useApp = create<AppState>()((set, get) => ({
   select(space, channel) {
     pending = { space, channel: channel ?? null, until: Date.now() + 5000 };
     const lastChannel = channel ? { ...get().lastChannel, [space]: channel } : get().lastChannel;
-    set({ space, channel: channel ?? lastChannel[space] ?? null, lastChannel, watchFullscreen: null });
+    set({ space, channel: channel ?? lastChannel[space] ?? null, lastChannel, watchFullscreen: null, welcome: false });
     reconcile();
   },
   toast(kind, text) {
@@ -165,6 +167,7 @@ function reconcile() {
   const s = useApp.getState();
   const snap = s.snap;
   if (!snap) return;
+  if (s.welcome) return;
   if (pending) {
     const sp = snap.spaces.find((x) => x.id === pending!.space);
     const arrived = sp && (!pending.channel || sp.channels.some((c) => c.id === pending!.channel));
@@ -173,7 +176,7 @@ function reconcile() {
   }
   const space = snap.spaces.find((x) => x.id === s.space) ?? snap.spaces[0];
   if (!space) {
-    if (s.space !== null || s.channel !== null) useApp.setState({ space: null, channel: null });
+    useApp.setState({ space: null, channel: null, welcome: true });
     return;
   }
   let ch = space.channels.find((c) => c.id === s.channel);
@@ -196,6 +199,7 @@ useApp.subscribe((s, p) => {
 let readTimer = 0;
 
 function visibleChat(s: AppState) {
+  if (s.welcome) return;
   const ch = s.snap?.spaces.find((x) => x.id === s.space)?.channels.find((c) => c.id === s.channel);
   return ch?.kind === "voice" && !s.voiceChatOpen ? undefined : ch;
 }
@@ -212,7 +216,7 @@ function markReadSoon(space: Id, channel: Id) {
 
 function applySnapshot(snap: Snapshot) {
   const previous = useApp.getState();
-  const cue = previous.statusSounds ? statusCue(previous.snap, snap) : undefined;
+  const cue = previous.statusSounds && !previous.welcome ? statusCue(previous.snap, snap) : undefined;
   const voice = snap.voice;
   const watching = previous.watchFullscreen;
   const stillWatching = watching && voice && snap.spaces.find((space) => space.id === voice.space)

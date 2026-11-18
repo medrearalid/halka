@@ -158,8 +158,9 @@ export function createMockBackend(): Backend {
   s2.members = [mkMember(me.id, [r2.member.id], P.mert), mkMember(P.mert, [], P.mert), mkMember(P.kaan, [r2.member.id], P.mert), mkMember(P.burak, [], P.mert)];
 
   const spaces: MSpace[] = fresh ? [] : [s1, s2];
+  const activeRelayOnly = localStorage.getItem("halka.mock.relayOnly") === "true";
   let settings: Settings = {
-    relay_only: false,
+    relay_only: activeRelayOnly,
     relays: [],
     noise_suppression: true,
     echo_cancellation: true,
@@ -229,6 +230,7 @@ export function createMockBackend(): Backend {
     return [...set];
   };
   const snapshot = (): Snapshot => ({
+    active_relay_only: activeRelayOnly,
     me: { ...me },
     profiles: structuredClone(profiles),
     spaces: spaces.map((sp) => ({
@@ -614,6 +616,7 @@ export function createMockBackend(): Backend {
     set_audio_devices: ({ input, output }) => void (devices = { ...devices, input, output }),
     get_settings: () => ({ ...settings }),
     set_settings: ({ settings: s }) => {
+      localStorage.setItem("halka.mock.relayOnly", String(s.relay_only));
       settings = { ...s };
       changed();
     },

@@ -3,6 +3,7 @@ import {
   Check,
   ChevronsUpDown,
   Hash,
+  House,
   Lock,
   LogOut,
   Mic,
@@ -39,7 +40,12 @@ export function Sidebar() {
   const inVoice = useApp((s) => !!s.snap?.voice);
   return (
     <aside className="flex min-h-0 w-[220px] shrink-0 flex-col border-r border-line bg-paper-0">
-      <SpaceSwitcher space={space} />
+      <div className="flex h-11 shrink-0 items-center gap-1 border-b border-line px-2">
+        <IconBtn label="Karşılama ekranına dön" side="bottom" onClick={() => useApp.setState({ welcome: true })}>
+          <House />
+        </IconBtn>
+        <SpaceSwitcher space={space} />
+      </div>
       <button
         onClick={() => useApp.getState().setPalette(true)}
         className="mx-2 mt-2 flex h-7 items-center gap-2 rounded-md border border-line bg-paper-1 px-2 text-xs text-ink-3 transition-colors duration-150 hover:border-line-2 hover:text-ink-2"
@@ -73,7 +79,7 @@ function SpaceSwitcher({ space }: { space: SpaceView | null }) {
   const canSettings = !!space && (has(space, "manage_space") || has(space, "manage_channels") || has(space, "manage_roles") || has(space, "invite") || has(space, "ban"));
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="flex h-11 shrink-0 items-center gap-2 border-b border-line px-3 text-left outline-none hover:bg-paper-2 focus-visible:bg-paper-2 data-[state=open]:bg-paper-2">
+      <DropdownMenuTrigger className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 text-left outline-none hover:bg-paper-2 focus-visible:bg-paper-2 data-[state=open]:bg-paper-2">
         {space && <SpaceGlyph space={space} />}
         <span className="min-w-0 flex-1 truncate text-[13px] font-semibold tracking-tight">{space?.name ?? "Halka seç"}</span>
         <ChevronsUpDown className="size-3.5 text-ink-3" />

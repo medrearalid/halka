@@ -150,6 +150,7 @@ pub struct MyVoice {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Snapshot {
+    pub active_relay_only: bool,
     pub profiles: std::collections::HashMap<Id, ProfileView>,
     pub me: Me,
     pub spaces: Vec<SpaceView>,

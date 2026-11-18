@@ -85,6 +85,7 @@ pub(crate) struct Inner {
     pub me: Id,
     pub store: Store,
     pub ep: Endpoint,
+    pub active_relay_only: bool,
     pub ev: mpsc::UnboundedSender<Event>,
     pub st: Mutex<St>,
     /// Connections that should receive our voice datagrams.
@@ -171,6 +172,7 @@ impl Node {
             me,
             store,
             ep,
+            active_relay_only: settings.relay_only,
             ev: tx,
             st: Mutex::new(St {
                 name,
@@ -234,6 +236,7 @@ impl Node {
             }
         }
         Snapshot {
+            active_relay_only: i.active_relay_only,
             profiles,
             me: api::Me {
                 id: i.me,

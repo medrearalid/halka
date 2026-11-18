@@ -31,6 +31,7 @@ function useGlobalKeys() {
       if (mod && !e.shiftKey && e.key.toLowerCase() === "k") {
         e.preventDefault();
         const s = useApp.getState();
+        if (s.welcome) return;
         s.setPalette(!s.palette);
         return;
       }
@@ -110,7 +111,7 @@ export function App() {
   }, [fullscreen]);
   const ready = useApp((s) => s.snap !== null);
   const bootError = useApp((s) => s.bootError);
-  const needsOnboarding = useApp((s) => !!s.snap && (!s.snap.me.name.trim() || s.snap.me.name === "Anonim" || s.snap.spaces.length === 0));
+  const needsOnboarding = useApp((s) => s.welcome);
 
   return (
     <TooltipProvider delayDuration={600} skipDelayDuration={200}>

@@ -254,6 +254,7 @@ function Audio() {
 
 function Privacy() {
   const settings = useApp((s) => s.snap!.settings);
+  const active = useApp((s) => s.snap!.active_relay_only);
   const [url, setUrl] = useState("");
   const valid = /^https?:\/\/[^\s]+$/i.test(url.trim()) && !settings.relays.includes(url.trim());
   return (
@@ -264,7 +265,8 @@ function Privacy() {
           label="IP adresimi gizle (yalnızca relay)"
           desc={
             <>
-              Eşlere doğrudan bağlanmaz; tüm trafik relay’den geçer. Gecikme biraz artabilir. <span className="text-warn">Yeniden başlatma gerekir.</span>
+              {active ? "IP eşlerden gizli." : "Doğrudan bağlantıya izin veriliyor."}{" "}
+              {active !== settings.relay_only ? <span className="text-warn">Yeniden başlatınca uygulanacak.</span> : "Değişiklikler yeniden başlatınca uygulanır."}
             </>
           }
         >

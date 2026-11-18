@@ -132,6 +132,7 @@ export interface Settings {
 }
 
 export interface Snapshot {
+  active_relay_only: boolean;
   me: Me;
   profiles: Record<Id, ProfileView | undefined>;
   spaces: SpaceView[];
