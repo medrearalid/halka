@@ -783,7 +783,9 @@ fn handle(i: &Arc<Inner>, remote: Id, f: Frame) -> Result<()> {
                 return Ok(());
             }
             match voice {
-                Some(p) => {
+                Some(mut p) => {
+                    // a modified client can claim to stream without the permission: don't believe it
+                    p.streaming &= may_stream(&st, space, remote, p.channel);
                     let ok = st.spaces.get(&space).is_some_and(|l| {
                         l.state
                             .channels
@@ -1183,19 +1185,36 @@ async fn datagram_loop(i: Arc<Inner>, conn: Connection, remote: Id) {
     }
 }
 
+/// Video bytes a sharer may push us: the "maximum" preset tops out at 80 Mbit/s, so this leaves
+/// headroom for key frames while a modified client can't flood a watcher's link.
+const VIDEO_BYTES_PER_SEC: f64 = 12.0 * 1024.0 * 1024.0;
+const VIDEO_BURST_BYTES: f64 = 24.0 * 1024.0 * 1024.0;
+
+/// The sharer is in that voice channel of the space with the stream permission.
+fn may_stream(st: &St, space: Id, remote: Id, channel: Id) -> bool {
+    st.spaces
+        .get(&space)
+        .is_some_and(|l| l.state.can_in(&remote, &channel, Perms::STREAM))
+}
+
 async fn uni_loop(i: Arc<Inner>, conn: Connection, remote: Id) {
     let profile_reads = Arc::new(tokio::sync::Semaphore::new(4));
     let profile_rate = Arc::new(parking_lot::Mutex::new(Rate::new(8.0, 24.0)));
+    let video_rate = Arc::new(parking_lot::Mutex::new(Rate::new(
+        VIDEO_BYTES_PER_SEC,
+        VIDEO_BURST_BYTES,
+    )));
     while let Ok(mut r) = conn.accept_uni().await {
         let i = i.clone();
         let conn = conn.clone();
         let profile_reads = profile_reads.clone();
         let profile_rate = profile_rate.clone();
+        let video_rate = video_rate.clone();
         tokio::spawn(async move {
             let mut tag = [0u8; 1];
             if matches!(tokio::time::timeout(Duration::from_secs(5), r.read_exact(&mut tag)).await, Ok(Ok(_))) {
                 match tag[0] {
-                    wire::UNI_STREAM => { let _ = read_gop(&i, &mut r, remote).await; }
+                    wire::UNI_STREAM => { let _ = read_gop(&i, &mut r, remote, &video_rate).await; }
                     crate::profile::TAG => {
                         let allowed = profile_rate.lock().allow(1.0);
                         if allowed && let Ok(_permit) = profile_reads.try_acquire() {
@@ -1211,17 +1230,34 @@ async fn uni_loop(i: Arc<Inner>, conn: Connection, remote: Id) {
 }
 
 /// One GOP stream from a sharer we're watching. Supersede the old GOP once the new key arrives.
-async fn read_gop(i: &Inner, r: &mut RecvStream, remote: Id) -> Result<()> {
-    let (sink, current) =
-        i.st.lock()
-            .watching
-            .get(&remote)
-            .cloned()
-            .context("not watching")?;
+/// Each GOP rechecks the stream permission, so revoking it ends the stream at the next key frame;
+/// going over the byte budget drops the rest of the GOP (a partial GOP can't be decoded anyway).
+async fn read_gop(
+    i: &Inner,
+    r: &mut RecvStream,
+    remote: Id,
+    rate: &parking_lot::Mutex<Rate>,
+) -> Result<()> {
+    let (sink, current) = {
+        let st = i.st.lock();
+        let v = st.voice.as_ref().context("not in voice")?;
+        ensure!(
+            may_stream(&st, v.space, remote, v.channel),
+            "sharer may not stream here"
+        );
+        st.watching.get(&remote).cloned().context("not watching")?
+    };
     let index = r.id().index();
-    let Some(first) = read_stream_packet(r).await? else { return Ok(()) };
+    let packet = async |r: &mut RecvStream| -> Result<Option<Vec<u8>>> {
+        let p = read_stream_packet(r).await?;
+        if let Some(p) = &p {
+            ensure!(rate.lock().allow(p.len() as f64), "video rate limit exceeded");
+        }
+        Ok(p)
+    };
+    let Some(first) = packet(r).await? else { return Ok(()) };
     let (config, key) = if first[0] == 0 {
-        let Some(key) = read_stream_packet(r).await? else { return Ok(()) };
+        let Some(key) = packet(r).await? else { return Ok(()) };
         (Some(first), key)
     } else {
         (None, first)
@@ -1238,7 +1274,7 @@ async fn read_gop(i: &Inner, r: &mut RecvStream, remote: Id) -> Result<()> {
         }
         sink(key);
     }
-    while let Some(pkt) = read_stream_packet(r).await? {
+    while let Some(pkt) = packet(r).await? {
         let current = current.lock();
         if *current != Some(index) {
             break;

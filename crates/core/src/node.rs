@@ -818,7 +818,9 @@ impl Node {
             .get(&(v.space, member))
             .context("bu kişi odada değil")?;
         ensure!(
-            p.channel == v.channel && p.streaming,
+            p.channel == v.channel
+                && p.streaming
+                && st.spaces[&v.space].state.can_in(&member, &v.channel, Perms::STREAM),
             "bu kişi şu an yayın yapmıyor"
         );
         let peer = st.peers.get(&member).context("bu kişiye bağlı değilsin")?;
@@ -1021,7 +1023,7 @@ fn space_view(i: &Inner, st: &St, log: &SpaceLog) -> api::SpaceView {
         for ((sp, m), p) in &st.presence {
             if *sp == s.id && p.channel == *cid && st.peers.contains_key(m) {
                 voice.push(*m);
-                if p.streaming {
+                if p.streaming && s.can_in(m, cid, Perms::STREAM) {
                     streams.push(*m);
                 }
             }

@@ -4,6 +4,7 @@ use std::time::Duration;
 use halka_core::{Node, PhotoEdit};
 use halka_core::id::Id;
 use halka_core::op::{ChannelKind, OpBody};
+use halka_core::perm::Perms;
 
 async fn node(dir: &tempfile::TempDir, name: &str) -> Node {
     let (n, mut rx) = Node::start(&dir.path().join(name)).await.unwrap();
@@ -502,4 +503,52 @@ async fn speech_roundtrip_recording() {
     );
     halka_core::voice::test_support::write_wav(&out, &rec).unwrap();
     assert!(rec.len() > 48_000);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn revoked_stream_permission_stops_the_stream_at_the_watcher() {
+    let dir = tempfile::tempdir().unwrap();
+    let (a, b) = (node(&dir, "ayse").await, node(&dir, "berk").await);
+    let s = a.create_space("Yetki").unwrap();
+    b.join_space(&a.create_invite(s, None, None).unwrap()).await.unwrap();
+    let vc = voice_channel(&a, s);
+    a.voice_join(s, vc).unwrap();
+    b.voice_join(s, vc).unwrap();
+    b.stream_start().unwrap();
+    let streams = |n: &Node| {
+        n.snapshot().spaces[0]
+            .channels
+            .iter()
+            .find(|c| c.id == vc)
+            .map(|c| c.streams.clone())
+            .unwrap_or_default()
+    };
+    until("a sees b's stream", || streams(&a) == vec![b.id()]).await;
+    let got = std::sync::Arc::new(parking_lot::Mutex::new(Vec::<Vec<u8>>::new()));
+    let g = got.clone();
+    a.watch(b.id(), std::sync::Arc::new(move |p| g.lock().push(p))).unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    b.stream_packet(pkt(1, 1, b"key-before")).unwrap();
+    until("first GOP arrives", || got.lock().len() == 1).await;
+
+    // the owner takes streaming away from @everyone; b's client keeps sending like a modified one
+    a.op(
+        s,
+        OpBody::UpdateRole {
+            role: s,
+            name: "herkes".into(),
+            color: 0,
+            perms: Perms(Perms::EVERYONE.0 & !Perms::STREAM.0),
+            rank: 0,
+        },
+    )
+    .unwrap();
+    until("a hides b's stream", || streams(&a).is_empty()).await;
+    assert!(a.watch(b.id(), std::sync::Arc::new(|_| {})).is_err());
+    b.stream_packet(pkt(1, 2, b"key-after")).unwrap();
+    b.stream_packet(pkt(2, 3, b"delta-after")).unwrap();
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!(got.lock().len(), 1, "no GOP may arrive after the permission is gone");
+    a.shutdown().await;
+    b.shutdown().await;
 }
