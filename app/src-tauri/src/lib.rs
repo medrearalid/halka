@@ -50,6 +50,16 @@ fn profile_photo(n: State<Node>, member: Id, hash: Id) -> R<String> {
 }
 
 #[tauri::command(async)]
+fn delete_space(n: State<Node>, space: Id) -> R<()> {
+    n.delete_space(space).map_err(e)
+}
+
+#[tauri::command(async)]
+fn require_relay(n: State<Node>, space: Id) -> R<()> {
+    n.op(space, OpBody::RequireRelay).map(|_| ()).map_err(e)
+}
+
+#[tauri::command(async)]
 fn create_space(n: State<Node>, name: String, relay_required: bool) -> R<Id> {
     n.create_space(&name, relay_required).map_err(e)
 }
@@ -681,6 +691,8 @@ pub fn run() {
             updater::update_retry,
             updater::update_restart_now,
             restart_app,
+            delete_space,
+            require_relay,
             take_resume,
         ])
         .build(tauri::generate_context!())

@@ -98,6 +98,8 @@ pub enum OpBody {
     /// Members may only connect through relays (no IP reaches peers). Appended last so the
     /// postcard tags of every older variant stay put.
     RequireRelay,
+    /// Owner ends the space for everyone. Clears membership, so every removal path drops it.
+    DeleteSpace,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

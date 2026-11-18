@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, Ban, Hash, Lock, Plus, Settings2, Shield, Ticket, Volume2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Ban, ChevronRight, Hash, Lock, Plus, Settings2, Shield, ShieldCheck, Ticket, Users, Volume2 } from "lucide-react";
+import { enableRelay } from "@/lib/relay";
+import { MemberManagement } from "./MembersPanel";
 import { call, type ChannelKind, type ChannelView, type Id, type Perm, type RoleView, type SpaceView } from "@/ipc";
 import { useApp } from "@/state/store";
 import { has, hex, memberOf, myRank, nameOf, shortId, useSpace } from "@/lib/space";
@@ -8,17 +10,21 @@ import { fail } from "@/lib/actions";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Avatar, Empty, Field, Segmented } from "./common";
+import { Avatar, ConnExplainer, Empty, Field, Segmented } from "./common";
 import { InviteCreator } from "./InviteCreator";
 import { Group, PaneTitle, Row, SettingsLayout, type Tab } from "./SettingsLayout";
 import { useSubmit } from "./forms";
 
-type TabId = "general" | "channels" | "roles" | "invites" | "bans";
+type TabId = "general" | "connection" | "members" | "channels" | "roles" | "invites" | "bans";
 
 export function SpaceSettings({ initialTab }: { initialTab?: string }) {
   const space = useSpace();
   const tabs = useMemo(() => {
-    const t: Tab<TabId>[] = [{ id: "general", label: "Genel", icon: <Settings2 /> }];
+    const t: Tab<TabId>[] = [
+      { id: "general", label: "Genel", icon: <Settings2 /> },
+      { id: "connection", label: "Bağlantı", icon: <ShieldCheck /> },
+      { id: "members", label: "Üyeler", icon: <Users /> },
+    ];
     if (has(space, "manage_channels")) t.push({ id: "channels", label: "Kanallar", icon: <Hash /> });
     if (has(space, "manage_roles")) t.push({ id: "roles", label: "Roller", icon: <Shield /> });
     if (has(space, "invite")) t.push({ id: "invites", label: "Davetler", icon: <Ticket /> });
@@ -28,9 +34,13 @@ export function SpaceSettings({ initialTab }: { initialTab?: string }) {
   const [tab, setTab] = useState<TabId>(tabs.some((t) => t.id === initialTab) ? (initialTab as TabId) : "general");
   if (!space) return null;
   return (
-    <SettingsLayout title="Halka ayarları" subtitle={space.name} tabs={tabs} tab={tab} setTab={setTab}>
+    <SettingsLayout title="Halka yönetimi" subtitle={space.name} tabs={tabs} tab={tab} setTab={setTab}>
       {tab === "general" ? (
         <General space={space} leaveOpen={initialTab === "leave"} />
+      ) : tab === "connection" ? (
+        <Connection space={space} />
+      ) : tab === "members" ? (
+        <Members space={space} />
       ) : tab === "channels" ? (
         <Channels space={space} />
       ) : tab === "roles" ? (
@@ -95,13 +105,167 @@ function General({ space, leaveOpen }: { space: SpaceView; leaveOpen: boolean })
         </Row>
       </Group>
       <Group title="Tehlikeli bölge">
-        <Row
-          label="Halkadan ayrıl"
-          desc={isOwner ? "Kurucu sensin. Ayrılırsan halkayı yeniden ancak bir davetle bulabilirsin." : "Mesaj geçmişi bu cihazdan kaldırılır."}
-        >
-          <LeaveButton space={space} armed={leaveOpen} />
-        </Row>
+        {isOwner ? (
+          <DeleteSpace space={space} />
+        ) : (
+          <Row label="Halkadan ayrıl" desc="Mesaj geçmişi bu cihazdan kaldırılır.">
+            <LeaveButton space={space} armed={leaveOpen} />
+          </Row>
+        )}
       </Group>
+    </>
+  );
+}
+
+/** Irreversible for every member, so the name must be typed back. */
+function DeleteSpace({ space }: { space: SpaceView }) {
+  const [typed, setTyped] = useState<string | null>(null);
+  const close = useApp((s) => s.closeDialog);
+  const del = useSubmit(() => call("delete_space", { space: space.id }), close);
+  return typed === null ? (
+    <Row label="Halkayı sil" desc="Halka, kanalları ve mesajları bütün üyeler için kalıcı olarak silinir. Geri alınamaz.">
+      <Button size="sm" variant="destructive" onClick={() => setTyped("")}>
+        Sil
+      </Button>
+    </Row>
+  ) : (
+    <form
+      className="grid gap-2 py-3"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (typed === space.name) void del.run();
+      }}
+    >
+      <label htmlFor="delete-confirm" className="text-xs text-ink-2">
+        Onaylamak için halkanın adını yaz: <span className="font-medium text-ink-1" data-selectable>{space.name}</span>
+      </label>
+      <input id="delete-confirm" className="field" autoFocus value={typed} onChange={(e) => setTyped(e.target.value)} />
+      {del.error && <p className="text-xs text-danger">{del.error}</p>}
+      <div className="flex gap-1.5">
+        <Button type="submit" size="sm" variant="destructive" disabled={typed !== space.name} aria-busy={del.busy}>
+          {del.busy ? "Siliniyor…" : "Halkayı kalıcı olarak sil"}
+        </Button>
+        <Button type="button" size="sm" variant="ghost" onClick={() => setTyped(null)}>
+          Vazgeç
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+// ---------------------------------------------------------------- connection
+
+function Connection({ space }: { space: SpaceView }) {
+  const meId = useApp((s) => s.snap!.me.id);
+  const relayActive = useApp((s) => s.snap!.active_relay_only);
+  const [armed, setArmed] = useState(false);
+  const isOwner = space.owner === meId;
+  const turnOn = useSubmit(async () => {
+    await call("require_relay", { space: space.id });
+    // the owner's own device must follow, or the halka locks for them too
+    if (!relayActive) await enableRelay();
+  });
+  return (
+    <>
+      <PaneTitle title="Bağlantı" desc="Üyelerin birbirine nasıl bağlandığını belirler." />
+      <Group>
+        <Row
+          label="Relay şart"
+          desc={space.relay_required ? "Açık. Üyeler yalnızca relay üzerinden bağlanır, IP adresleri gizli." : "Kapalı. Üyeler doğrudan bağlanabilir."}
+        >
+          {space.relay_required ? (
+            <span className="flex items-center gap-1 text-xs text-live">
+              <ShieldCheck className="size-3.5" /> Açık
+            </span>
+          ) : isOwner && !armed ? (
+            <Button size="sm" variant="secondary" onClick={() => setArmed(true)}>
+              Zorunlu yap
+            </Button>
+          ) : (
+            <span className="text-xs text-ink-3">Kapalı</span>
+          )}
+        </Row>
+        {armed && !space.relay_required && (
+          <div className="grid gap-2 border-b border-line py-3">
+            <p className="text-xs text-ink-2">
+              Bu işlem geri alınamaz. Mevcut davet kodları iptal edilir; relay’i açmamış üyeler açana kadar halkaya erişemez.
+              {relayActive ? "" : " Senin uygulaman da relay’e geçip yeniden başlar."}
+            </p>
+            {turnOn.error && <p className="text-xs text-danger">{turnOn.error}</p>}
+            <div className="flex gap-1.5">
+              <Button size="sm" disabled={turnOn.busy} aria-busy={turnOn.busy} onClick={() => void turnOn.run()}>
+                {turnOn.busy ? "Uygulanıyor…" : "Relay’i zorunlu yap"}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setArmed(false)}>
+                Vazgeç
+              </Button>
+            </div>
+          </div>
+        )}
+        <ConnExplainer className="py-3" />
+      </Group>
+      {!isOwner && !space.relay_required && <p className="text-2xs text-ink-3">Bu ayarı yalnızca kurucu değiştirebilir.</p>}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------- members
+
+function Members({ space }: { space: SpaceView }) {
+  const meId = useApp((s) => s.snap!.me.id);
+  const [open, setOpen] = useState<Id | null>(null);
+  const [q, setQ] = useState("");
+  const needle = q.trim().toLocaleLowerCase("tr");
+  const list = space.members
+    .filter((m) => m.name.toLocaleLowerCase("tr").includes(needle))
+    .sort((a, b) => Number(b.online) - Number(a.online) || a.name.localeCompare(b.name, "tr"));
+  return (
+    <>
+      <PaneTitle title="Üyeler" desc={`${space.members.length} üye. Bir üyeye tıklayarak rollerini ve erişimini yönet.`} />
+      <input className="field mb-2" placeholder="Üye ara" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Üye ara" />
+      <div className="rounded-lg border border-line">
+        {list.map((m) => {
+          const roles = space.roles.filter((r) => m.roles.includes(r.id) && r.id !== space.id);
+          const expanded = open === m.id;
+          return (
+            <div key={m.id} className="border-b border-line last:border-b-0">
+              <button
+                onClick={() => setOpen(expanded ? null : m.id)}
+                aria-expanded={expanded}
+                className="flex h-10 w-full items-center gap-2.5 px-3 text-left hover:bg-paper-2"
+              >
+                <Avatar id={m.id} name={m.name} size={22} online={m.online} />
+                <span className="min-w-0 flex-1 truncate text-[13px]">
+                  {m.name}
+                  {m.id === meId && <span className="text-ink-3"> (sen)</span>}
+                </span>
+                {m.id === space.owner ? (
+                  <span className="text-2xs text-copper">Kurucu</span>
+                ) : (
+                  roles.slice(0, 2).map((r) => (
+                    <span key={r.id} className="flex items-center gap-1 text-2xs text-ink-3">
+                      <span className="size-1.5 rounded-full" style={{ background: hex(r.color) }} />
+                      {r.name}
+                    </span>
+                  ))
+                )}
+                <span className="w-16 text-right text-2xs text-ink-3">
+                  {m.conn === "direct" ? "doğrudan" : m.conn === "relay" ? "relay" : m.conn === "self" ? "" : "bağlı değil"}
+                </span>
+                <ChevronRight className={cn("size-3.5 text-ink-3 transition-transform duration-150", expanded && "rotate-90")} />
+              </button>
+              {expanded && (
+                <div className="grid gap-1 px-3 pb-3">
+                  <MemberManagement space={space} member={m} />
+                  {(m.id === meId || m.id === space.owner) && (
+                    <p className="text-2xs text-ink-3">{m.id === meId ? "Kendini buradan yönetemezsin." : "Kurucu yönetilemez."}</p>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </>
   );
 }

@@ -13,7 +13,7 @@ import {
   Plus,
   Search,
   Settings,
-  Settings2,
+  SlidersHorizontal,
   Ticket,
   Volume2,
 } from "lucide-react";
@@ -76,7 +76,7 @@ function SpaceGlyph({ space, size = 20 }: { space: { id: string; name: string };
 function SpaceSwitcher({ space }: { space: SpaceView | null }) {
   const spaces = useApp((s) => s.snap!.spaces);
   const { select, openDialog } = useApp.getState();
-  const canSettings = !!space && (has(space, "manage_space") || has(space, "manage_channels") || has(space, "manage_roles") || has(space, "invite") || has(space, "ban"));
+  const meId = useApp((s) => s.snap!.me.id);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 text-left outline-none hover:bg-paper-2 focus-visible:bg-paper-2 data-[state=open]:bg-paper-2">
@@ -114,17 +114,15 @@ function SpaceSwitcher({ space }: { space: SpaceView | null }) {
                 <Plus /> Davet et
               </DropdownMenuItem>
             )}
-            {canSettings && (
-              <DropdownMenuItem onSelect={() => openDialog("space-settings")}>
-                <Settings2 /> Halka ayarları
+            <DropdownMenuItem onSelect={() => openDialog("space-settings")}>
+              <SlidersHorizontal /> Halkayı yönet
+            </DropdownMenuItem>
+            {/* the owner cannot leave; deleting lives in halka management */}
+            {space.owner !== meId && (
+              <DropdownMenuItem variant="destructive" onSelect={() => openDialog("space-settings", "leave")}>
+                <LogOut /> Halkadan ayrıl
               </DropdownMenuItem>
             )}
-            <DropdownMenuItem
-              variant="destructive"
-              onSelect={() => openDialog("space-settings", "leave")}
-            >
-              <LogOut /> Halkadan ayrıl
-            </DropdownMenuItem>
           </>
         )}
       </DropdownMenuContent>
@@ -276,7 +274,7 @@ function UserBar() {
           <span className="block truncate text-2xs text-ink-3">{online ? "Çevrimiçi" : "Ağa bağlanılıyor…"}</span>
         </span>
       </button>
-      <IconBtn label="Ayarlar" onClick={() => useApp.getState().openDialog("app-settings")}>
+      <IconBtn label="Uygulama ayarları" onClick={() => useApp.getState().openDialog("app-settings")}>
         <Settings />
       </IconBtn>
     </div>

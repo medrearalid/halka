@@ -165,6 +165,10 @@ export interface Commands {
   /** Accepts a "halka:…" invite code. Resolves with the space id once joined. */
   join_space: { args: { code: string }; ret: Id };
   leave_space: { args: { space: Id }; ret: void };
+  /** Owner only: ends the halka for every member. */
+  delete_space: { args: { space: Id }; ret: void };
+  /** Owner only, one-way: members may connect only through relays. Revokes existing invites. */
+  require_relay: { args: { space: Id }; ret: void };
   rename_space: { args: { space: Id; name: string }; ret: void };
   /** expiresInMs/maxUses null = unlimited. Returns the shareable code. */
   create_invite: {

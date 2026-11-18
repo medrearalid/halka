@@ -371,6 +371,19 @@ impl Node {
         }
     }
 
+    /// Owner only: ends the space for every member.
+    pub fn delete_space(&self, space: Id) -> Result<()> {
+        let i = &self.0;
+        let mut st = i.st.lock();
+        let log = st.spaces.get(&space).context("halka yok")?;
+        ensure!(log.state.owner == i.me, "halkayı yalnızca kurucu silebilir");
+        author(i, &mut st, space, OpBody::DeleteSpace)?;
+        lose_space_locked(i, &mut st, space);
+        drop(st);
+        i.emit(Event::Changed);
+        Ok(())
+    }
+
     pub fn leave_space(&self, space: Id) -> Result<()> {
         let i = &self.0;
         let mut st = i.st.lock();
@@ -987,6 +1000,35 @@ pub(crate) fn leave_voice_locked(i: &Inner, st: &mut St) {
     if let Some(space) = space {
         crate::net::broadcast(st, space, None, || Frame::Presence { space, voice: None });
     }
+}
+
+/// We are no longer in `space` (kicked, banned or the owner deleted it): leave and tell the user.
+/// A deleted space keeps its proof, so members who were offline learn of it when they reconnect.
+pub(crate) fn lose_space_locked(i: &Inner, st: &mut St, space: Id) {
+    let Some(log) = st.spaces.get(&space) else {
+        return;
+    };
+    let name = log.state.name.clone();
+    let deleted = log.state.deleted;
+    if deleted && let Some(proof) = log.removal_proof(&i.me) {
+        let _ = i.store.set_meta(&tomb_key(&space), &postcard::to_stdvec(&proof).unwrap_or_default());
+    }
+    if st.voice.as_ref().is_some_and(|v| v.space == space) {
+        leave_voice_locked(i, st);
+    }
+    drop_space_locked(i, st, space);
+    i.notice(
+        true,
+        if deleted {
+            format!("“{name}” halkası silindi.")
+        } else {
+            format!("“{name}” halkasından çıkarıldın.")
+        },
+    );
+}
+
+pub(crate) fn tomb_key(space: &Id) -> String {
+    format!("tomb/{}", data_encoding::HEXLOWER.encode(&space.0))
 }
 
 pub(crate) fn drop_space_locked(i: &Inner, st: &mut St, space: Id) {

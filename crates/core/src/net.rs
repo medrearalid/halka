@@ -301,7 +301,14 @@ async fn accept(
                     .and_then(|l| l.removal_proof(&remote))
                     .map(|ops| (*s, ops))
             })
-        };
+        }
+        .or_else(|| {
+            // a space the owner deleted: we kept its proof for members who were offline
+            spaces.iter().find_map(|s| {
+                let b = i.store.meta(&crate::node::tomb_key(s)).ok()??;
+                postcard::from_bytes::<Vec<SignedOp>>(&b).ok().map(|ops| (*s, ops))
+            })
+        });
         if let Some((space, ops)) = proof {
             for chunk in ops.chunks(MAX_OPS_PER_FRAME) {
                 wire::write_frame(
@@ -357,12 +364,7 @@ fn apply_removal_proof(i: &Inner, space: Id, ops: Vec<SignedOp>) {
         .collect();
     let _ = i.store.put_ops(&space, &new);
     if !log.state.is_member(&i.me) {
-        let name = log.state.name.clone();
-        if st.voice.as_ref().is_some_and(|v| v.space == space) {
-            crate::node::leave_voice_locked(i, &mut st);
-        }
-        crate::node::drop_space_locked(i, &mut st, space);
-        i.notice(true, format!("“{name}” halkasından çıkarıldın."));
+        crate::node::lose_space_locked(i, &mut st, space);
         i.emit(Event::Changed);
     }
 }
@@ -932,12 +934,7 @@ fn ingest_ops(
         announce_presence(st, remote);
     }
     if !st.spaces[&space].state.is_member(&i.me) && !st.joins.contains_key(&space) {
-        let name = st.spaces[&space].state.name.clone();
-        if st.voice.as_ref().is_some_and(|v| v.space == space) {
-            crate::node::leave_voice_locked(i, st);
-        }
-        crate::node::drop_space_locked(i, st, space);
-        i.notice(true, format!("“{name}” halkasından çıkarıldın."));
+        crate::node::lose_space_locked(i, st, space);
     } else {
         enforce_access(i, st);
     }
@@ -1007,10 +1004,11 @@ pub(crate) fn enforce_access(i: &Inner, st: &mut St) {
         if p.joining.is_some() {
             continue;
         }
+        // a space switched to relay-only while we bind directly stops syncing right away
         p.spaces.retain(|s| {
-            st.spaces
-                .get(s)
-                .is_some_and(|l| l.state.is_member(m) && l.state.is_member(&me))
+            st.spaces.get(s).is_some_and(|l| {
+                l.state.is_member(m) && l.state.is_member(&me) && !l.state.locked(i.active_relay_only)
+            })
         });
         if p.spaces.is_empty() {
             close.push(*m);
@@ -1025,6 +1023,11 @@ pub(crate) fn enforce_access(i: &Inner, st: &mut St) {
                 conn.close(3u32.into(), b"access revoked");
             });
         }
+    }
+    if let Some(v) = st.voice.as_ref()
+        && st.spaces.get(&v.space).is_some_and(|l| l.state.locked(i.active_relay_only))
+    {
+        crate::node::leave_voice_locked(i, st);
     }
     let spaces = &st.spaces;
     st.presence

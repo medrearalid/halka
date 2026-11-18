@@ -216,13 +216,19 @@ function MemberRow({ space, m, role, open, onOpenChange }: {
   );
 }
 
-function MemberManagement({ space, member }: { space: SpaceView; member: MemberView }) {
-  const meId = useApp((s) => s.snap?.me.id);
+export function MemberManagement({ space, member }: { space: SpaceView; member: MemberView }) {
+  const meId = useApp((s) => s.snap!.me.id);
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<"kick" | "ban">();
-  if (meId !== space.owner || member.id === meId) return null;
+  const above = member.id !== meId && outranks(space, meId, member);
+  const canKick = above && has(space, "kick");
+  const canBan = above && has(space, "ban");
+  const mine = myRank(space, meId);
+  const roles = above && has(space, "manage_roles")
+    ? space.roles.filter((r) => r.id !== space.id && r.rank < mine).sort((a, b) => b.rank - a.rank)
+    : [];
+  if (!canKick && !canBan && roles.length === 0) return null;
 
-  const roles = space.roles.filter((r) => r.id !== space.id).sort((a, b) => b.rank - a.rank);
   const target = { space: space.id, member: member.id };
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
@@ -272,8 +278,8 @@ function MemberManagement({ space, member }: { space: SpaceView; member: MemberV
           </>
         ) : (
           <>
-            <Button size="xs" variant="ghost" className="text-danger" onClick={() => setConfirm("kick")}>Halkadan çıkar</Button>
-            <Button size="xs" variant="ghost" className="text-danger" onClick={() => setConfirm("ban")}>Yasakla</Button>
+            {canKick && <Button size="xs" variant="ghost" className="text-danger" onClick={() => setConfirm("kick")}>Halkadan çıkar</Button>}
+            {canBan && <Button size="xs" variant="ghost" className="text-danger" onClick={() => setConfirm("ban")}>Yasakla</Button>}
           </>
         )}
       </div>

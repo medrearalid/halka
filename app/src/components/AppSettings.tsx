@@ -43,7 +43,7 @@ export function keyLabel(code: string) {
 export function AppSettings() {
   const [tab, setTab] = useState<TabId>("profile");
   return (
-    <SettingsLayout title="Ayarlar" subtitle="Bu cihaz için" tabs={TABS} tab={tab} setTab={setTab}>
+    <SettingsLayout title="Uygulama ayarları" subtitle="Bu cihaz için" tabs={TABS} tab={tab} setTab={setTab}>
       {tab === "profile" && <Profile />}
       {tab === "audio" && <Audio />}
       {tab === "shortcuts" && <Shortcuts />}

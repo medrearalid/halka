@@ -1,5 +1,6 @@
 import { useEffect } from "react";
-import { Hash, Lock, MessageSquare, UserPlus, Users, Volume2, Settings2 } from "lucide-react";
+import { Hash, Lock, MessageSquare, SlidersHorizontal, UserPlus, Users, Volume2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { useApp } from "@/state/store";
 import { has, useSpace } from "@/lib/space";
 import { cn } from "@/lib/utils";
@@ -28,8 +29,6 @@ export function Shell() {
     window.addEventListener("keydown", esc);
     return () => window.removeEventListener("keydown", esc);
   }, [membersOpen, setMembersOpen]);
-  const canSettings =
-    !!space && (has(space, "manage_space") || has(space, "manage_channels") || has(space, "manage_roles") || has(space, "ban"));
 
   return (
     <div className="flex h-full min-w-0">
@@ -70,10 +69,10 @@ export function Shell() {
                 <UserPlus />
               </IconBtn>
             )}
-            {canSettings && (
-              <IconBtn label="Halka ayarları" side="bottom" onClick={() => openDialog("space-settings")}>
-                <Settings2 />
-              </IconBtn>
+            {space && (
+              <Button variant="ghost" size="sm" className="gap-1.5 text-ink-2" onClick={() => openDialog("space-settings")}>
+                <SlidersHorizontal /> Halkayı yönet
+              </Button>
             )}
             <IconBtn
               label={membersOpen ? "Üyeleri gizle" : "Üyeleri göster"}

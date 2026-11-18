@@ -451,6 +451,21 @@ export function createMockBackend(): Backend {
       if (voice?.space === space) voice = null;
       setMyVoice();
     },
+    delete_space: ({ space }) => {
+      const s = sp(space);
+      if (s.owner !== me.id) throw "Halkayı yalnızca kurucu silebilir";
+      spaces.splice(spaces.indexOf(s), 1);
+      if (voice?.space === space) voice = null;
+      setMyVoice();
+      emit("notice", { kind: "info", text: `“${s.name}” halkası silindi.` });
+    },
+    require_relay: ({ space }) => {
+      const s = sp(space);
+      if (s.owner !== me.id) throw "Bunu yalnızca kurucu yapabilir";
+      s.relay_required = true;
+      s.invites = [];
+      changed();
+    },
     rename_space: ({ space, name }) => {
       const s = sp(space);
       need(s, "manage_space");

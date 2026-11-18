@@ -61,6 +61,7 @@ pub struct State {
     pub invites: BTreeMap<Id, Invite>,
     pub bans: BTreeSet<Id>,
     pub relay_required: bool,
+    pub deleted: bool,
     /// Ex-members' last known names (so history still shows who wrote what).
     pub former: BTreeMap<Id, String>,
 }
@@ -80,6 +81,7 @@ impl State {
             invites: BTreeMap::new(),
             bans: BTreeSet::new(),
             relay_required: false,
+            deleted: false,
             former: BTreeMap::new(),
         };
         s.members.insert(
@@ -206,6 +208,7 @@ impl State {
     /// Apply one op, checking permissions against the current state.
     pub fn apply(&mut self, e: &Entry) -> Result<()> {
         let a = &e.op.author;
+        ensure!(!self.deleted, "halka silindi");
         match &e.op.body {
             OpBody::Genesis { .. } => bail!("duplicate genesis"),
             OpBody::RenameSpace { name } => {
@@ -215,6 +218,14 @@ impl State {
             OpBody::RequireRelay => {
                 ensure!(*a == self.owner, "bunu yalnızca kurucu yapabilir");
                 self.relay_required = true;
+                // old codes lack the relay flag, so a direct joiner would dial with its IP
+                self.invites.clear();
+            }
+            OpBody::DeleteSpace => {
+                ensure!(*a == self.owner, "halkayı yalnızca kurucu silebilir");
+                self.deleted = true;
+                self.members.clear();
+                self.invites.clear();
             }
             OpBody::CreateChannel {
                 name,
@@ -711,7 +722,9 @@ impl SpaceLog {
     pub fn removal_proof(&self, member: &Id) -> Option<Vec<SignedOp>> {
         let r =
             self.order().into_iter().rev().find(|e| {
-                !self.rejected.contains(&e.id) && removal_target(&e.op) == Some(*member)
+                !self.rejected.contains(&e.id)
+                    && (removal_target(&e.op) == Some(*member)
+                        || matches!(e.op.body, OpBody::DeleteSpace))
             })?;
         let mut out: Vec<SignedOp> = self
             .reach(r.id, false)
@@ -926,6 +939,20 @@ mod tests {
         let mut replay = SpaceLog::new(log.get(&log.id).unwrap().signed.clone()).unwrap();
         replay.insert_many(log.entries().map(|e| e.signed.clone()).collect::<Vec<_>>());
         assert!(replay.state.relay_required && replay.contains(&op.id()));
+    }
+
+    #[test]
+    fn only_owner_deletes_and_it_ends_the_space() {
+        let (o, b, mut log) = setup();
+        assert!(log.author(&b, OpBody::DeleteSpace).is_err());
+        log.author(&o, OpBody::DeleteSpace).unwrap();
+        assert!(log.state.deleted && !log.state.is_member(&idk(&o)) && !log.state.is_member(&idk(&b)));
+        assert!(log.author(&o, OpBody::RenameSpace { name: "x".into() }).is_err());
+        // an offline member replaying the proof ends up outside too
+        let proof = log.removal_proof(&idk(&b)).unwrap();
+        let mut late = SpaceLog::new(log.get(&log.id).unwrap().signed.clone()).unwrap();
+        late.insert_many(proof);
+        assert!(late.state.deleted && !late.state.is_member(&idk(&b)));
     }
 
     #[test]
