@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isTauri } from "@/ipc";
 import { RingMark } from "./common";
+import { UpdatePill } from "./UpdatePill";
 
 /** Window chrome: drag area plus three window controls. Close hides to the tray. */
 export function TitleBar() {
@@ -25,6 +26,7 @@ export function TitleBar() {
         Halka
       </span>
       <div data-tauri-drag-region className="h-full flex-1" />
+      <UpdatePill />
       <div role="group" aria-label="Pencere kontrolleri" className="flex items-center gap-0.5 rounded-full border border-line-2 bg-paper-1 p-0.5">
         <WindowButton label="Simge durumuna küçült" onClick={act((w) => w.minimize())} tone="ink">
           <path d="M4 8h8" />

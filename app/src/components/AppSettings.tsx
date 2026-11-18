@@ -13,6 +13,7 @@ import { Slider } from "@/components/ui/slider";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Avatar, Field, Kbd } from "./common";
 import { Group, PaneTitle, Row, SettingsLayout, type Tab } from "./SettingsLayout";
+import { AppVersion } from "./UpdatePill";
 
 type TabId = "profile" | "audio" | "shortcuts" | "privacy";
 const TABS: Tab<TabId>[] = [
@@ -90,6 +91,7 @@ function Profile() {
           </Button>
         </div>
       </Group>
+      <AppVersion />
     </>
   );
 }

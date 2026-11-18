@@ -12,6 +12,7 @@ import type {
   Settings,
   Snapshot,
   SpaceView,
+  UpdateStatus,
 } from "./contract";
 import { runEncoder, type EncodeLoop } from "@/media/encoder";
 import { moveRole } from "@/lib/roleOrder";
@@ -299,6 +300,8 @@ export function createMockBackend(): Backend {
     changed();
   };
   let myStreaming = false;
+  let updateStatus: UpdateStatus = { state: "idle" };
+  const setUpdate = (u: UpdateStatus) => emit("update", (updateStatus = u));
 
   // --- fake screen streams for `watch`
   const watching = new Map<Id, { loop: EncodeLoop; stop: () => void }>();
@@ -634,6 +637,24 @@ export function createMockBackend(): Backend {
       watching.get(member)?.stop();
       watching.delete(member);
     },
+    update_status: () => updateStatus,
+    // fake run: check, download in ~4 s, then ready; ?update=error fails instead
+    update_retry: () => {
+      const fail = new URLSearchParams(location.search).get("update") === "error";
+      setUpdate({ state: "checking" });
+      let pct = 0;
+      const t = window.setInterval(() => {
+        pct += 7;
+        if (fail && pct > 40) {
+          clearInterval(t);
+          setUpdate({ state: "error", message: "Güncelleme sunucusuna ulaşılamadı" });
+        } else if (pct >= 100) {
+          clearInterval(t);
+          setUpdate({ state: "ready", version: "9.9.9" });
+        } else setUpdate({ state: "downloading", version: "9.9.9", pct });
+      }, 250);
+    },
+    update_restart_now: () => location.reload(),
   };
 
   return {

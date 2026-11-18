@@ -12,6 +12,7 @@ import { Toasts } from "@/components/Toasts";
 import { Dialogs } from "@/components/Dialogs";
 import { CommandPalette } from "@/components/CommandPalette";
 import { TitleBar } from "@/components/TitleBar";
+import { WhatsNew } from "@/components/WhatsNew";
 
 function useGlobalKeys() {
   useEffect(() => {
@@ -115,6 +116,7 @@ export function App() {
     <TooltipProvider delayDuration={600} skipDelayDuration={200}>
       <div className="flex h-full flex-col">
       {!fullscreen && <TitleBar />}
+      {!fullscreen && <WhatsNew />}
       <div className="min-h-0 flex-1">
       {bootError ? (
         <div className="grid h-full place-items-center">

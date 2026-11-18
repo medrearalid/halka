@@ -12,6 +12,8 @@ use serde_json::json;
 use tauri::ipc::{Channel, InvokeBody, InvokeResponseBody, Request};
 use tauri::{AppHandle, Emitter, Manager, State};
 
+mod updater;
+
 #[cfg(windows)]
 mod capture;
 #[cfg(windows)]
@@ -417,32 +419,6 @@ fn show_main(app: &AppHandle) {
     }
 }
 
-/// Checks GitHub Releases at launch and every 6 h, installs silently, never in the middle of a call.
-async fn auto_update(app: AppHandle, node: Node) {
-    loop {
-        if let Err(err) = try_update(&app, &node).await {
-            tracing::warn!("update check failed: {err:#}");
-        }
-        tokio::time::sleep(Duration::from_secs(6 * 3600)).await;
-    }
-}
-
-async fn try_update(app: &AppHandle, node: &Node) -> anyhow::Result<()> {
-    use tauri_plugin_updater::UpdaterExt;
-    let Some(update) = app.updater()?.check().await? else {
-        return Ok(());
-    };
-    tracing::info!("downloading update {}", update.version);
-    let bytes = update.download(|_, _| {}, || {}).await?;
-    while node.snapshot().voice.is_some() {
-        tokio::time::sleep(Duration::from_secs(30)).await;
-    }
-    // install() exits the process on Windows (the installer relaunches Halka), so flush first
-    node.shutdown().await;
-    update.install(bytes)?;
-    app.restart();
-}
-
 pub fn run() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
@@ -458,6 +434,7 @@ pub fn run() {
     }
     builder
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updater::Updater::default())
         .on_window_event(|w, e| {
             // the close button keeps Halka running in the tray (voice stays connected)
             if let tauri::WindowEvent::CloseRequested { api, .. } = e {
@@ -608,7 +585,7 @@ pub fn run() {
             }
             // dev builds and side-by-side test profiles never self-update
             if !cfg!(debug_assertions) && profile().is_none() {
-                tauri::async_runtime::spawn(auto_update(app.handle().clone(), node.clone()));
+                tauri::async_runtime::spawn(updater::run(app.handle().clone(), node.clone()));
             }
             tauri::async_runtime::spawn(pump(app.handle().clone(), node, rx));
             Ok(())
@@ -664,6 +641,9 @@ pub fn run() {
             return_watch_focus,
             watch,
             unwatch,
+            updater::update_status,
+            updater::update_retry,
+            updater::update_restart_now,
         ])
         .build(tauri::generate_context!())
         .expect("failed to build app")

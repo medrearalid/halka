@@ -18,8 +18,8 @@ yapar, ama arada kimsenin sunucusu yoktur. Halkayı oluşturan kişinin bilgisay
 ```bash
 cd app
 bun install
-bun x @tauri-apps/cli@2 dev        # geliştirme
-bun x @tauri-apps/cli@2 build      # kurulum dosyası: target/release/bundle/nsis/
+bun x @tauri-apps/cli@2.12.5 dev        # geliştirme
+bun x @tauri-apps/cli@2.12.5 build      # kurulum dosyası: target/release/bundle/nsis/
 ```
 
 Bir bilgisayarda iki ayrı kimlik açmak için: `halka.exe --profile ikinci`.
@@ -36,14 +36,17 @@ bash tools/e2e/run.sh          # iki gerçek örnek: isim, halka, davet, katılm
 
 ## Sürüm yayınlama ve güncelleme
 
-`app/src-tauri/tauri.conf.json` içindeki `version` değerini artır, commit'le ve aynı sürümle tag at:
+1. `CHANGELOG.md` dosyasına yeni sürüm için `## 0.2.0` başlığı ve altına kullanıcıya dönük, kısa Türkçe maddeler ekle (önceki tag'den bu yana `git log --format=%s v0.1.9..HEAD` çıktısından). Teknik iç değişiklikler yazılmaz. Bu bölüm GitHub sürüm sayfasına, `latest.json` içindeki `notes` alanına ve uygulamadaki "Neler değişti" kartına gider. Bölüm yoksa sürüm derlemesi durur.
+2. `app/src-tauri/tauri.conf.json` içindeki `version` değerini artır, commit'le ve aynı sürümle tag at:
 
 ```bash
 git tag v0.2.0 && git push origin main v0.2.0
 ```
 
 GitHub Actions kurulum dosyasını derleyip imzalar ve [Releases](https://github.com/medrearalid/halka/releases) sayfasına `latest.json` ile birlikte yükler.
-Kurulu uygulamalar açılışta ve 6 saatte bir bu dosyayı kontrol eder. Yeni sürümü arka planda indirir ve sesli görüşmede değilken kendiliğinden kurup yeniden açılır.
+Kurulu uygulamalar açılışta ve 6 saatte bir bu dosyayı kontrol eder (hata olursa 5 ve 30 dakika sonra yeniden dener). Yeni sürümü arka planda indirir, ilerlemeyi başlık çubuğunda gösterir ve sesli görüşmede değilken kendiliğinden kurup yeniden açılır; "Yeniden başlat" ile hemen kurulabilir. Güncellemeden sonraki ilk açılışta "Neler değişti" kartı çıkar.
+
+Kurulum ekranı Tauri'nin NSIS şablonunun Halka'ya uyarlanmış kopyasıdır (`app/src-tauri/windows/installer.nsi`, değişiklikler "Halka:" ile işaretli). Şablon `@tauri-apps/cli@2.12.5` sürümüne bağlıdır; CLI sürümü yükseltilirse upstream şablon yeniden alınıp işaretli bloklar tekrar uygulanır. Karşılama görseli `python app/src-tauri/windows/make-installer-art.py` ile üretilir.
 Güncellemeler `TAURI_SIGNING_PRIVATE_KEY` secret'ındaki anahtarla imzalanır; uygulama yalnızca bu anahtarla imzalanmış sürümleri kabul eder.
 
 ## Mimari

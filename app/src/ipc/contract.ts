@@ -236,7 +236,21 @@ export interface Commands {
   /** Start receiving a member's stream; packets arrive on `channel` (tauri Channel<ArrayBuffer>). */
   watch: { args: { member: Id; channel: unknown }; ret: void };
   unwatch: { args: { member: Id }; ret: void };
+
+  // ---- self-update (installed builds only; dev builds stay "idle")
+  update_status: { args: {}; ret: UpdateStatus };
+  /** Check again now. */
+  update_retry: { args: {}; ret: void };
+  /** Install the downloaded update now, even mid-call. */
+  update_restart_now: { args: {}; ret: void };
 }
+
+export type UpdateStatus =
+  | { state: "idle" }
+  | { state: "checking" }
+  | { state: "downloading"; version: string; pct: number | null }
+  | { state: "ready"; version: string }
+  | { state: "error"; message: string };
 
 // ---------------------------------------------------------------- events
 // listen(name, e => e.payload)
@@ -255,6 +269,7 @@ export interface Events {
   capture_quick_started: { id: string };
   capture_feedback: { live: boolean };
   watch_fullscreen: { space: Id; channel: Id; member: Id } | null;
+  update: UpdateStatus;
 }
 
 export interface CaptureSource {

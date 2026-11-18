@@ -50,7 +50,10 @@
           "Turkish",
           "English"
         ],
-        "installerHooks": "./windows/hooks.nsh"
+        "installerHooks": "./windows/hooks.nsh",
+        "template": "./windows/installer.nsi",
+        "sidebarImage": "./windows/installer-hero.bmp",
+        "installerIcon": "./icons/icon.ico"
       }
     },
     "createUpdaterArtifacts": true

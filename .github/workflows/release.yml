@@ -25,6 +25,16 @@ jobs:
           v="v$(jq -r .version app/src-tauri/tauri.conf.json)"
           [ "$v" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME != tauri.conf.json $v"; exit 1; }
 
+      # The tag's CHANGELOG.md section becomes the release page text and latest.json "notes".
+      - name: Release notes from CHANGELOG.md
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          notes="$(awk -v v="$v" '/^## /{p=($2==v || $2=="v"v); next} p' CHANGELOG.md | sed -e '/./,$!d')"
+          [ -n "$(printf '%s' "$notes" | grep -E '^[-*] ')" ] || { echo "CHANGELOG.md has no '## $v' section with items"; exit 1; }
+          { echo "RELEASE_NOTES<<__NOTES__"; printf '%s\n' "$notes"; echo "__NOTES__"; } >> "$GITHUB_ENV"
+
       - uses: oven-sh/setup-bun@v2
       - uses: dtolnay/rust-toolchain@stable
       - uses: swatinem/rust-cache@v2
@@ -40,9 +50,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: app
-          tauriScript: bun x @tauri-apps/cli@2
+          tauriScript: bun x @tauri-apps/cli@2.12.5
           tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
           releaseName: Halka ${{ github.ref_name }}
-          releaseBody: Kurulum için Halka_*_x64-setup.exe dosyasını indir. Kurulu uygulamalar kendiliğinden güncellenir.
+          releaseBody: ${{ env.RELEASE_NOTES }}
           releaseDraft: false
           prerelease: false
