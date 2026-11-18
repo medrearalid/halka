@@ -47,6 +47,7 @@ interface MSpace {
   id: Id;
   name: string;
   owner: Id;
+  relay_required?: boolean;
   channels: ChannelView[];
   roles: RoleView[];
   members: MemberView[];
@@ -235,6 +236,7 @@ export function createMockBackend(): Backend {
     profiles: structuredClone(profiles),
     spaces: spaces.map((sp) => ({
       ...structuredClone(sp),
+      relay_required: !!sp.relay_required,
       my_perms: permsOf(sp),
       channels: structuredClone(sp.channels),
     })),
@@ -420,9 +422,9 @@ export function createMockBackend(): Backend {
       if (!photo || profiles[member]?.photo !== hash) throw "Profil fotoğrafı bulunamadı";
       return photo;
     },
-    create_space: ({ name }) => {
+    create_space: ({ name, relayRequired }) => {
       const s: MSpace = {
-        id: newId(), name: String(name).trim() || "Yeni halka", owner: me.id,
+        id: newId(), name: String(name).trim() || "Yeni halka", owner: me.id, relay_required: !!relayRequired,
         channels: [ch("genel", "text"), ch("Salon", "voice")], roles: [], members: [mkMember(me.id, [], me.id)], bans: [], invites: [],
       };
       s.members[0].is_owner = true;
@@ -658,6 +660,15 @@ export function createMockBackend(): Backend {
       }, 250);
     },
     update_restart_now: () => location.reload(),
+    restart_app: ({ resume }) => {
+      sessionStorage.setItem("halka.mock.resume", resume);
+      location.reload();
+    },
+    take_resume: () => {
+      const r = sessionStorage.getItem("halka.mock.resume");
+      sessionStorage.removeItem("halka.mock.resume");
+      return r;
+    },
   };
 
   return {

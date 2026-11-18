@@ -51,7 +51,7 @@ async fn member_profiles_sync_and_survive_offline() {
 
     a.update_profile("Ayşe", 0x81a1ff, "Merhaba", PhotoEdit::Replace(encoded.clone())).unwrap();
     b.update_profile("Berk", 0xefab71, "", PhotoEdit::Keep).unwrap();
-    let space = a.create_space("Profil").unwrap();
+    let space = a.create_space("Profil", false).unwrap();
     b.join_space(&a.create_invite(space, None, None).unwrap()).await.unwrap();
     until("both members see independent profiles and the photo", || {
         b.snapshot().profiles.get(&aid).is_some_and(|p| p.photo == Some(hash) && p.orb_color == 0x81a1ff && p.bio == "Merhaba")
@@ -111,7 +111,7 @@ async fn space_lifecycle() {
         node(&dir, "cem").await,
     );
 
-    let s = a.create_space("Kanka").unwrap();
+    let s = a.create_space("Kanka", false).unwrap();
     let ch = text_channel(&a, s);
     let voice = voice_channel(&a, s);
     a.send_message(s, ch, "selam", None).unwrap();
@@ -238,7 +238,7 @@ fn pkt(kind: u8, ts: u64, body: &[u8]) -> Vec<u8> {
 async fn screen_share_flows_to_watcher() {
     let dir = tempfile::tempdir().unwrap();
     let (a, b) = (node(&dir, "ayse").await, node(&dir, "berk").await);
-    let s = a.create_space("Yayin").unwrap();
+    let s = a.create_space("Yayin", false).unwrap();
     let code = a.create_invite(s, None, None).unwrap();
     b.join_space(&code).await.unwrap();
     let vc = voice_channel(&a, s);
@@ -309,7 +309,7 @@ async fn screen_share_flows_to_watcher() {
 async fn survives_restart_and_relay_only() {
     let dir = tempfile::tempdir().unwrap();
     let (a, b) = (node(&dir, "ayse").await, node(&dir, "berk").await);
-    let s = a.create_space("Kalici").unwrap();
+    let s = a.create_space("Kalici", false).unwrap();
     let ch = text_channel(&a, s);
     b.join_space(&a.create_invite(s, None, None).unwrap())
         .await
@@ -390,7 +390,7 @@ async fn voice_reaches_peer_for(relay_only: bool, mic: &'static str, listen_secs
     };
     let a = mk("ayse").await;
     let b = mk("berk").await;
-    let s = a.create_space("Ton").unwrap();
+    let s = a.create_space("Ton", false).unwrap();
     b.join_space(&a.create_invite(s, None, None).unwrap())
         .await
         .unwrap();
@@ -509,7 +509,7 @@ async fn speech_roundtrip_recording() {
 async fn revoked_stream_permission_stops_the_stream_at_the_watcher() {
     let dir = tempfile::tempdir().unwrap();
     let (a, b) = (node(&dir, "ayse").await, node(&dir, "berk").await);
-    let s = a.create_space("Yetki").unwrap();
+    let s = a.create_space("Yetki", false).unwrap();
     b.join_space(&a.create_invite(s, None, None).unwrap()).await.unwrap();
     let vc = voice_channel(&a, s);
     a.voice_join(s, vc).unwrap();

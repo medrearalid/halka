@@ -60,6 +60,7 @@ pub struct State {
     pub channels: BTreeMap<Id, Channel>,
     pub invites: BTreeMap<Id, Invite>,
     pub bans: BTreeSet<Id>,
+    pub relay_required: bool,
     /// Ex-members' last known names (so history still shows who wrote what).
     pub former: BTreeMap<Id, String>,
 }
@@ -78,6 +79,7 @@ impl State {
             channels: BTreeMap::new(),
             invites: BTreeMap::new(),
             bans: BTreeSet::new(),
+            relay_required: false,
             former: BTreeMap::new(),
         };
         s.members.insert(
@@ -98,6 +100,12 @@ impl State {
             },
         );
         Ok(s)
+    }
+
+    /// A relay-required space stays inactive (no sync, no voice) until relay-only is on, so a
+    /// direct endpoint never hands its IP to this space's members.
+    pub fn locked(&self, relay_active: bool) -> bool {
+        self.relay_required && !relay_active
     }
 
     pub fn is_member(&self, m: &Id) -> bool {
@@ -203,6 +211,10 @@ impl State {
             OpBody::RenameSpace { name } => {
                 self.need(a, Perms::MANAGE_SPACE)?;
                 self.name = name.clone();
+            }
+            OpBody::RequireRelay => {
+                ensure!(*a == self.owner, "bunu yalnızca kurucu yapabilir");
+                self.relay_required = true;
             }
             OpBody::CreateChannel {
                 name,
@@ -902,6 +914,18 @@ mod tests {
         let mut log = SpaceLog::new(create_genesis(&o, "test").unwrap()).unwrap();
         join(&mut log, &o, &b);
         (o, b, log)
+    }
+
+    #[test]
+    fn relay_required_owner_only_and_locks() {
+        let (o, b, mut log) = setup();
+        assert!(log.author(&b, OpBody::RequireRelay).is_err());
+        assert!(!log.state.relay_required && !log.state.locked(false));
+        let op = log.author(&o, OpBody::RequireRelay).unwrap();
+        assert!(log.state.locked(false) && !log.state.locked(true));
+        let mut replay = SpaceLog::new(log.get(&log.id).unwrap().signed.clone()).unwrap();
+        replay.insert_many(log.entries().map(|e| e.signed.clone()).collect::<Vec<_>>());
+        assert!(replay.state.relay_required && replay.contains(&op.id()));
     }
 
     #[test]

@@ -1,9 +1,38 @@
 import * as React from "react";
+import { ShieldCheck } from "lucide-react";
 import { hueOf, initials } from "@/lib/avatar";
 import { useProfilePhoto } from "@/lib/profile";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
+
+export const RELAY_HINT = "Relay şart: bağlantılar aktarma sunucusundan geçer, IP adresleri gizli kalır";
+
+/** Marks a halka whose members connect only through relays. */
+export function RelayMark({ className }: { className?: string }) {
+  return (
+    <span title={RELAY_HINT} className={cn("inline-flex shrink-0 text-ink-3", className)}>
+      <ShieldCheck className="size-3.5" aria-hidden />
+      <span className="sr-only">{RELAY_HINT}</span>
+    </span>
+  );
+}
+
+/** Plain-words difference between the two connection modes. */
+export function ConnExplainer({ className }: { className?: string }) {
+  return (
+    <dl className={cn("grid gap-1.5 text-xs text-ink-3", className)}>
+      <div>
+        <dt className="inline font-medium text-ink-2">Doğrudan bağlantı: </dt>
+        <dd className="inline">Cihazlar birbirine doğrudan bağlanır, en hızlısı budur. Üyeler birbirinin IP adresini görebilir; tehlikeli değil ama yalnızca güvendiğin arkadaşlarla kullan.</dd>
+      </div>
+      <div>
+        <dt className="inline font-medium text-ink-2">Relay: </dt>
+        <dd className="inline">Bağlantı aradaki bir aktarma sunucusundan geçer. IP adresin kimseye görünmez, ses biraz gecikebilir. Tanımadığın kişilerin olduğu halkalar için.</dd>
+      </div>
+    </dl>
+  );
+}
 
 export function Avatar({
   id,

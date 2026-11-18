@@ -10,6 +10,7 @@ import { MembersPanel } from "./MembersPanel";
 import { OrbStage } from "./OrbLayer";
 import { VoiceDock } from "./VoiceDock";
 import { Empty, IconBtn, RingMark } from "./common";
+import { RelayGate } from "./forms";
 
 export function Shell() {
   const space = useSpace();
@@ -17,7 +18,9 @@ export function Shell() {
   const membersOpen = useApp((s) => s.membersOpen);
   const voiceChatOpen = useApp((s) => s.voiceChatOpen);
   const watchFullscreen = useApp((s) => s.watchFullscreen !== null);
-  const channel = space?.channels.find((c) => c.id === channelId) ?? null;
+  const relayActive = useApp((s) => s.snap?.active_relay_only ?? false);
+  const locked = !!space?.relay_required && !relayActive;
+  const channel = locked ? null : (space?.channels.find((c) => c.id === channelId) ?? null);
   const { setMembersOpen, setVoiceChatOpen, openDialog } = useApp.getState();
   useEffect(() => {
     if (!membersOpen) return;
@@ -87,7 +90,13 @@ export function Shell() {
         </header>
         <div className="relative flex min-h-0 flex-1">
           <main className="@container relative flex min-w-0 flex-1 flex-col">
-            {!space || !channel ? (
+            {locked ? (
+              <div className="grid flex-1 place-items-center">
+                <Empty icon={<Lock className="size-6" />} title="Bu halka relay ile açılır" body="Bu halkada bağlantılar bir aktarma sunucusundan (relay) geçer, böylece kimse IP adresini görmez. Relay’i açınca uygulama yeniden başlar ve buraya döner.">
+                  <div className="mt-2"><RelayGate note={false} /></div>
+                </Empty>
+              </div>
+            ) : !space || !channel ? (
               <div className="grid flex-1 place-items-center">
                 <Empty icon={<RingMark size={26} />} title="Burada henüz kanal yok" body="Halka ayarlarından bir metin kanalı ya da ses odası oluştur." />
               </div>

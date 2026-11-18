@@ -84,6 +84,8 @@ pub struct SpaceView {
     pub id: Id,
     pub name: String,
     pub owner: Id,
+    /// Members connect only through relays; inactive here until relay-only is on.
+    pub relay_required: bool,
     pub my_perms: Vec<String>,
     pub channels: Vec<ChannelView>,
     pub roles: Vec<RoleView>,

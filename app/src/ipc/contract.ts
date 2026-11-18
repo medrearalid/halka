@@ -84,6 +84,8 @@ export interface SpaceView {
   id: Id;
   name: string;
   owner: Id;
+  /** Members connect only through relays; inactive on this device until relay-only is active. */
+  relay_required: boolean;
   /** Effective space-level permissions of the local user. */
   my_perms: Perm[];
   channels: ChannelView[];
@@ -159,7 +161,7 @@ export interface Commands {
   update_profile: { args: { name: string; orbColor: number; bio: string; photo: PhotoEdit }; ret: void };
   profile_photo: { args: { member: Id; hash: Id }; ret: string };
 
-  create_space: { args: { name: string }; ret: Id };
+  create_space: { args: { name: string; relayRequired: boolean }; ret: Id };
   /** Accepts a "halka:…" invite code. Resolves with the space id once joined. */
   join_space: { args: { code: string }; ret: Id };
   leave_space: { args: { space: Id }; ret: void };
@@ -244,6 +246,10 @@ export interface Commands {
   update_retry: { args: {}; ret: void };
   /** Install the downloaded update now, even mid-call. */
   update_restart_now: { args: {}; ret: void };
+  /** Relaunch the app (relay-only applies at bind time). */
+  restart_app: { args: { resume: string }; ret: void };
+  /** The `resume` given to restart_app, once. */
+  take_resume: { args: {}; ret: string | null };
 }
 
 export type UpdateStatus =

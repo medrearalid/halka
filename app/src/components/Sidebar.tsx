@@ -33,7 +33,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Avatar, IconBtn, Kbd, SectionLabel } from "./common";
+import { Avatar, IconBtn, Kbd, RelayMark, SectionLabel } from "./common";
 
 export function Sidebar() {
   const space = useSpace();
@@ -82,6 +82,7 @@ function SpaceSwitcher({ space }: { space: SpaceView | null }) {
       <DropdownMenuTrigger className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 text-left outline-none hover:bg-paper-2 focus-visible:bg-paper-2 data-[state=open]:bg-paper-2">
         {space && <SpaceGlyph space={space} />}
         <span className="min-w-0 flex-1 truncate text-[13px] font-semibold tracking-tight">{space?.name ?? "Halka seç"}</span>
+        {space?.relay_required && <RelayMark />}
         <ChevronsUpDown className="size-3.5 text-ink-3" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" sideOffset={4} className="w-[248px]">
@@ -92,6 +93,7 @@ function SpaceSwitcher({ space }: { space: SpaceView | null }) {
             <DropdownMenuItem key={s.id} onSelect={() => select(s.id)} className="gap-2">
               <SpaceGlyph space={s} size={18} />
               <span className="min-w-0 flex-1 truncate">{s.name}</span>
+              {s.relay_required && <RelayMark />}
               {unread > 0 && <span className="num text-2xs text-ink-3">{unread}</span>}
               {s.id === space?.id && <Check className="size-3.5 text-copper" />}
             </DropdownMenuItem>

@@ -95,6 +95,9 @@ pub enum OpBody {
         role: Id,
         target: Id,
     },
+    /// Members may only connect through relays (no IP reaches peers). Appended last so the
+    /// postcard tags of every older variant stay put.
+    RequireRelay,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

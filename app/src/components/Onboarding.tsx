@@ -4,8 +4,9 @@ import { call, type Id } from "@/ipc";
 import { useApp } from "@/state/store";
 import { playStatusSound } from "@/lib/statusSounds";
 import { Button } from "@/components/ui/button";
-import { RingMark } from "./common";
+import { RelayMark, RingMark } from "./common";
 import { CreateSpaceForm, JoinForm, useSubmit } from "./forms";
+import { enableRelay } from "@/lib/relay";
 import { WelcomeCrowd } from "./WelcomeCrowd";
 import "./welcome.css";
 
@@ -36,18 +37,16 @@ function Signature() {
 function PrivacyStatus() {
   const active = useApp((s) => s.snap!.active_relay_only);
   const requested = useApp((s) => s.snap!.settings.relay_only);
-  const { busy, error, run } = useSubmit(() => call("set_settings", {
-    settings: { ...useApp.getState().snap!.settings, relay_only: true },
-  }));
+  const { busy, error, run } = useSubmit(() => enableRelay());
   const Icon = active ? ShieldCheck : Shield;
-  return <div className="welcome-privacy">
+  return <div className="welcome-privacy" title="Doğrudan: en hızlısı, üyeler IP adresini görebilir. Relay: bağlantı aktarma sunucusundan geçer, IP adresin gizli kalır.">
     <Icon className={active ? "text-live" : "text-ink-2"} size={17} />
     <div aria-live="polite">
       <div>{active ? "IP eşlerden gizli" : "Doğrudan bağlantıya izin veriliyor"}</div>
       {active !== requested && <small className="text-warn">Yeniden başlatınca uygulanacak</small>}
       {error && <small className="block text-danger">{error}</small>}
     </div>
-    {!active && !requested && <Button variant="outline" disabled={busy} onClick={() => void run()}>IP’mi gizle</Button>}
+    {!active && <Button variant="outline" disabled={busy} aria-busy={busy} onClick={() => void run()}>{busy ? "Yeniden başlatılıyor…" : "IP’mi gizle"}</Button>}
   </div>;
 }
 
@@ -98,13 +97,13 @@ export function Onboarding() {
             {step === "create" ? <CreateSpaceForm autoFocus onDone={cue} /> : <JoinForm autoFocus onDone={cue} />}
           </div> : <>
             {last && <div className="welcome-last">
-              <div className="min-w-0"><h2 className="welcome-label">Son halkan</h2><p className="truncate text-2xl font-medium tracking-tight">{last.name}</p></div>
+              <div className="min-w-0"><h2 className="welcome-label">Son halkan</h2><p className="flex items-center gap-2 text-2xl font-medium tracking-tight"><span className="truncate">{last.name}</span>{last.relay_required && <RelayMark />}</p></div>
               <Button size="lg" onClick={() => enter(last.id)}>Devam et <ArrowRight /></Button>
             </div>}
             {others.length > 0 && <div className="welcome-list">
               <h2 className="welcome-label">{last ? "Diğer halkaların" : "Halkaların"}</h2>
               <ul>{others.map((space) => <li key={space.id}><button onClick={() => enter(space.id)}>
-                <RingMark size={15} /><span className="truncate">{space.name}</span><ChevronRight size={14} className="ml-auto" />
+                <RingMark size={15} /><span className="truncate">{space.name}</span>{space.relay_required && <RelayMark />}<ChevronRight size={14} className="ml-auto" />
               </button></li>)}</ul>
             </div>}
             <div className="flex flex-wrap gap-2">

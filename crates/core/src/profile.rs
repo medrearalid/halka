@@ -365,7 +365,7 @@ mod tests {
         a.update_profile("Ayşe", 0x414141, "İlk", PhotoEdit::Keep)
             .unwrap();
         let first = a.0.st.lock().profiles[&a.id()].meta.clone();
-        let space = a.create_space("Profil").unwrap();
+        let space = a.create_space("Profil", false).unwrap();
         b.join_space(&a.create_invite(space, None, None).unwrap())
             .await
             .unwrap();

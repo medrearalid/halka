@@ -271,7 +271,7 @@ impl Node {
 
     // ------------------------------------------------------------------ spaces
 
-    pub fn create_space(&self, name: &str) -> Result<Id> {
+    pub fn create_space(&self, name: &str, relay_required: bool) -> Result<Id> {
         let i = &self.0;
         let name = name.trim();
         let g = create_genesis(&i.key, name)?;
@@ -296,7 +296,10 @@ impl Node {
                 kind: ChannelKind::Voice,
                 private_roles: None,
             },
-        ] {
+        ]
+        .into_iter()
+        .chain(relay_required.then_some(OpBody::RequireRelay))
+        {
             ops.push(log.author(&i.key, body)?);
         }
         i.store.put_ops(&sid, &ops)?;
@@ -323,6 +326,7 @@ impl Node {
             }
         }
         ensure!(c.peer != i.me, "bu davet kodunu sen oluşturdun");
+        ensure!(!c.relay || i.active_relay_only, RELAY_REQUIRED);
         let (done_tx, done_rx) = oneshot::channel();
         // filed under the invite key until the dialed member tells us the space (net::dial)
         i.st.lock().joins.insert(
@@ -400,7 +404,8 @@ impl Node {
         max_uses: Option<u32>,
     ) -> Result<String> {
         let i = &self.0;
-        let code = InviteCode::new(i.me);
+        let mut code = InviteCode::new(i.me);
+        code.relay = i.st.lock().spaces.get(&space).is_some_and(|l| l.state.relay_required);
         let inv = code.key();
         let expires = expires_in_ms.map(|ms| id::now_ms().saturating_add(ms));
         let mut st = i.st.lock();
@@ -510,6 +515,7 @@ impl Node {
         let i = &self.0;
         let mut st = i.st.lock();
         let log = st.spaces.get(&space).context("halka yok")?;
+        ensure!(!log.state.locked(i.active_relay_only), RELAY_REQUIRED);
         let c = log.state.channels.get(&channel).context("oda yok")?;
         ensure!(c.kind == ChannelKind::Voice, "bu bir sesli oda değil");
         ensure!(log.state.can_view(&i.me, &channel), "bu odaya giremezsin");
@@ -847,6 +853,9 @@ impl Node {
 
 // ---------------------------------------------------------------------- helpers
 
+/// The UI matches on "relay şart" to offer turning relay on.
+const RELAY_REQUIRED: &str = "Bu halkada relay şart: önce IP’ni gizlemelisin";
+
 /// A bad network setting must never brick the app, but a fallback must never drop relay-only
 /// either: that would silently hand our IP to peers. So relay-only falls back to the default
 /// relays and, failing that, to an offline endpoint the user can fix from settings.
@@ -1118,6 +1127,7 @@ fn space_view(i: &Inner, st: &St, log: &SpaceLog) -> api::SpaceView {
         id: s.id,
         name: s.name.clone(),
         owner: s.owner,
+        relay_required: s.relay_required,
         my_perms: s.perms(&me).names(),
         channels,
         roles,

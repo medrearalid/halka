@@ -97,7 +97,7 @@ pub(crate) fn spawn_background(i: &Arc<Inner>) {
             let targets: Vec<Id> = {
                 let st = d.st.lock();
                 let mut t = BTreeSet::new();
-                for log in st.spaces.values() {
+                for log in st.spaces.values().filter(|l| !l.state.locked(d.active_relay_only)) {
                     t.extend(
                         log.state
                             .members
@@ -185,10 +185,10 @@ pub(crate) fn path_info(c: &Connection) -> (ConnKind, Option<u32>) {
 }
 
 /// Spaces where `m` is a member in our view.
-fn shared_spaces(st: &St, m: &Id) -> Vec<Id> {
+fn shared_spaces(i: &Inner, st: &St, m: &Id) -> Vec<Id> {
     st.spaces
         .iter()
-        .filter(|(_, l)| l.state.is_member(m))
+        .filter(|(_, l)| l.state.is_member(m) && !l.state.locked(i.active_relay_only))
         .map(|(s, _)| *s)
         .collect()
 }
@@ -199,7 +199,7 @@ pub(crate) async fn dial(i: &Arc<Inner>, m: Id, join: Option<wire::JoinReq>) -> 
         if st.peers.contains_key(&m) && join.is_none() {
             return Ok(());
         }
-        shared_spaces(&st, &m)
+        shared_spaces(i, &st, &m)
     };
     let conn = tokio::time::timeout(Duration::from_secs(15), i.ep.connect(m.key()?, wire::ALPN))
         .await
@@ -275,13 +275,17 @@ async fn accept(
         let st = i.st.lock();
         let mut allowed: Vec<Id> = spaces
             .iter()
-            .filter(|s| st.spaces.get(s).is_some_and(|l| l.state.is_member(&remote)))
+            .filter(|s| {
+                st.spaces.get(s).is_some_and(|l| {
+                    l.state.is_member(&remote) && !l.state.locked(i.active_relay_only)
+                })
+            })
             .copied()
             .collect();
         allowed.truncate(256);
         let mut joining = None;
         if let Some(j) = join {
-            let space = check_join(&st, &remote, &j)?;
+            let space = check_join(&st, i.active_relay_only, &remote, &j)?;
             allowed = vec![space];
             joining = Some(space);
         }
@@ -364,7 +368,7 @@ fn apply_removal_proof(i: &Inner, space: Id, ops: Vec<SignedOp>) {
 }
 
 /// Admission check for an invite holder; returns the space the invite opens.
-fn check_join(st: &St, joiner: &Id, j: &wire::JoinReq) -> Result<Id> {
+fn check_join(st: &St, relay_active: bool, joiner: &Id, j: &wire::JoinReq) -> Result<Id> {
     let log = st
         .spaces
         .values()
@@ -372,6 +376,7 @@ fn check_join(st: &St, joiner: &Id, j: &wire::JoinReq) -> Result<Id> {
         .context("unknown invite")?;
     let s = &log.state;
     ensure!(!s.is_member(joiner), "already a member");
+    ensure!(!s.locked(relay_active), "relay required");
     ensure!(!s.bans.contains(joiner), "banned");
     let inv = s.invites.get(&j.invite).context("unknown invite")?;
     ensure!(inv.expires.is_none_or(|x| id::now_ms() <= x), "expired");

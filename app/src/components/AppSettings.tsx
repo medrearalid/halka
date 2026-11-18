@@ -7,11 +7,12 @@ import { fail } from "@/lib/actions";
 import { cn } from "@/lib/utils";
 import { DEAFEN_SHORTCUT, MUTE_SHORTCUT, QUICK_SHARE_SHORTCUT, WATCH_FULLSCREEN_SHORTCUT } from "@/lib/shortcutLabels";
 import { usesNativeCapture } from "@/media/share";
+import { enableRelay } from "@/lib/relay";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Avatar, Field, Kbd } from "./common";
+import { Avatar, ConnExplainer, Field, Kbd } from "./common";
 import { Group, PaneTitle, Row, SettingsLayout, type Tab } from "./SettingsLayout";
 import { AppVersion } from "./UpdatePill";
 
@@ -265,13 +266,15 @@ function Privacy() {
           label="IP adresimi gizle (yalnızca relay)"
           desc={
             <>
-              {active ? "IP eşlerden gizli." : "Doğrudan bağlantıya izin veriliyor."}{" "}
-              {active !== settings.relay_only ? <span className="text-warn">Yeniden başlatınca uygulanacak.</span> : "Değişiklikler yeniden başlatınca uygulanır."}
+              {active ? "IP adresin gizli." : "Şu an doğrudan bağlanıyorsun."}{" "}
+              {active !== settings.relay_only ? <span className="text-warn">Bir sonraki açılışta doğrudan bağlantıya döner.</span> : active ? "Kapatırsan bir sonraki açılışta geçerli olur." : "Açınca uygulama hemen yeniden başlar."}
             </>
           }
         >
-          <Switch checked={settings.relay_only} onCheckedChange={(v) => saveSettings({ relay_only: v })} aria-label="Yalnızca relay" />
+          {/* turning on restarts right away and resumes; turning off waits for the next launch */}
+          <Switch checked={settings.relay_only} onCheckedChange={(v) => (v && !active ? void enableRelay().catch(fail) : saveSettings({ relay_only: v }))} aria-label="Yalnızca relay" />
         </Row>
+        <ConnExplainer className="border-b border-line py-2.5" />
       </Group>
       <Group title="Özel relay’ler">
         <div className="py-3">

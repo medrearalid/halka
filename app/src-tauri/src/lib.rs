@@ -50,8 +50,8 @@ fn profile_photo(n: State<Node>, member: Id, hash: Id) -> R<String> {
 }
 
 #[tauri::command(async)]
-fn create_space(n: State<Node>, name: String) -> R<Id> {
-    n.create_space(&name).map_err(e)
+fn create_space(n: State<Node>, name: String, relay_required: bool) -> R<Id> {
+    n.create_space(&name, relay_required).map_err(e)
 }
 
 #[tauri::command]
@@ -302,6 +302,31 @@ fn get_settings(n: State<Node>) -> Settings {
     n.settings()
 }
 
+const RESTARTED: &str = "HALKA_RESTARTED";
+const RESUME: &str = "HALKA_RESUME";
+
+/// Relay-only is fixed when the endpoint binds, so applying it means a fresh process. The Exit
+/// handler shuts the node down before the relaunch. `resume` rides the environment to the child
+/// (WebView storage may not flush before we exit).
+#[tauri::command(async)]
+fn restart_app(app: AppHandle, resume: String) {
+    // SAFETY: set right before exit; nothing else touches these variables concurrently
+    unsafe {
+        std::env::set_var(RESTARTED, "1");
+        std::env::set_var(RESUME, resume);
+    }
+    app.restart();
+}
+
+/// One-shot: where the UI was when restart_app ran.
+#[tauri::command]
+fn take_resume() -> Option<String> {
+    let r = std::env::var(RESUME).ok();
+    // SAFETY: called from the UI thread once at boot; nothing else reads RESUME
+    unsafe { std::env::remove_var(RESUME) };
+    r
+}
+
 #[tauri::command(async)]
 fn set_settings(n: State<Node>, mut settings: Settings) -> R<()> {
     // devices are owned by set_audio_devices; the UI's Settings shape doesn't carry them
@@ -451,7 +476,18 @@ pub fn run() {
             }) {
                 dir = dir.join("profiles").join(p);
             }
-            let (node, rx) = match tauri::async_runtime::block_on(Node::start(&dir)) {
+            // after restart_app the old process may still hold the database for a moment
+            let mut tries = if std::env::var_os(RESTARTED).is_some() { 30 } else { 0 };
+            let started = loop {
+                match tauri::async_runtime::block_on(Node::start(&dir)) {
+                    Err(err) if tries > 0 && format!("{err:#}").contains("already open") => {
+                        tries -= 1;
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
+                    r => break r,
+                }
+            };
+            let (node, rx) = match started {
                 Ok(v) => v,
                 // this profile is already running: the open window stays, the duplicate leaves quietly
                 Err(err) if format!("{err:#}").contains("already open") => std::process::exit(0),
@@ -644,6 +680,8 @@ pub fn run() {
             updater::update_status,
             updater::update_retry,
             updater::update_restart_now,
+            restart_app,
+            take_resume,
         ])
         .build(tauri::generate_context!())
         .expect("failed to build app")
