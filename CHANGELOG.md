@@ -9,7 +9,7 @@ Her sürüm `## <sürüm>` başlığıyla başlar. Maddeler kullanıcıya dönü
 - Ses odası yenilendi; üye panelinde rol sıralama ve profil önizlemesi geliştirildi.
 - Yalnızca aktarıcı ayarı, bağlantı hatasında bile IP adresini gizli tutuyor.
 - Güncellemeler başlık çubuğunda görünüyor: indirme durumu, "Yeniden başlat" ve hata olursa "Tekrar dene".
-- Yeni kurulum ekranı.
+- Yeni kurulum ve karşılama ekranı: açılışta halkanı seçiyorsun.
 
 ## 0.1.3
 
