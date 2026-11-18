@@ -239,9 +239,9 @@ function VoiceStatus() {
           <span className="absolute inset-0 rounded-full bg-live" />
           <span className="absolute inset-0 animate-[pulse-live_2s_ease-in-out_infinite] rounded-full bg-live" />
         </span>
-        <span className="min-w-0 flex-1 truncate text-xs">
-          <span className="font-medium text-live">{room?.name ?? "…"}</span>
-          <span className="text-ink-3"> · {space?.name}</span>
+        <span className="flex min-w-0 flex-1 flex-col leading-tight" title={`${room?.name ?? ""} · ${space?.name ?? ""}`}>
+          <span className="truncate text-xs font-medium text-live">{room?.name ?? "…"}</span>
+          <span className="truncate text-2xs text-ink-3">{space?.name}</span>
         </span>
         {ptt && <Kbd>{ptt.replace(/^Key|^Digit/, "")}</Kbd>}
       </button>
