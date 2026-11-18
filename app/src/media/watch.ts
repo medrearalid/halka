@@ -25,14 +25,16 @@ async function decoderConfig(cfg: StreamConfig): Promise<VideoDecoderConfig> {
   return base;
 }
 
-export function watchStream(member: string, canvas: HTMLCanvasElement, cb: WatchCallbacks = {}): WatchHandle {
+export function createStreamDecoder(canvas: HTMLCanvasElement, cb: WatchCallbacks = {}) {
   const ctx = canvas.getContext("2d", { alpha: false, desynchronized: true });
   let decoder: VideoDecoder | null = null;
   let config: StreamConfig | null = null;
   let waitKey = true;
   let pending: VideoFrame | null = null;
+  let firstFrame = true;
   let raf = 0;
   let stopped = false;
+  let generation = 0;
   let configuring: Promise<void> = Promise.resolve();
 
   const paint = () => {
@@ -40,12 +42,14 @@ export function watchStream(member: string, canvas: HTMLCanvasElement, cb: Watch
     const f = pending;
     pending = null;
     if (!f || !ctx) return f?.close();
-    if (canvas.width !== f.displayWidth || canvas.height !== f.displayHeight) {
+    const resized = canvas.width !== f.displayWidth || canvas.height !== f.displayHeight;
+    if (resized) {
       canvas.width = f.displayWidth;
       canvas.height = f.displayHeight;
-      cb.onSize?.(f.displayWidth, f.displayHeight);
     }
     ctx.drawImage(f, 0, 0);
+    if (firstFrame || resized) cb.onSize?.(f.displayWidth, f.displayHeight);
+    firstFrame = false;
     f.close();
   };
 
@@ -60,23 +64,36 @@ export function watchStream(member: string, canvas: HTMLCanvasElement, cb: Watch
   };
 
   const setup = (cfg: StreamConfig) => {
+    const current = ++generation;
     config = cfg;
     reset();
+    pending?.close();
+    pending = null;
+    firstFrame = true;
     configuring = decoderConfig(cfg).then((dc) => {
-      if (stopped || config !== cfg) return;
+      if (stopped || current !== generation) return;
       const d = new VideoDecoder({
         output: (frame) => {
+          if (stopped || current !== generation) {
+            frame.close();
+            return;
+          }
           pending?.close(); // drop stale frames: only the newest is painted
           pending = frame;
           if (!raf) raf = requestAnimationFrame(paint);
         },
-        error: () => {
+        error: (error) => {
           // wait for the next key frame with a fresh decoder
-          if (config && !stopped) setup(config);
+          if (!stopped && current === generation) {
+            cb.onError?.(error.message);
+            setup(cfg);
+          }
         },
       });
       d.configure(dc);
       decoder = d;
+    }).catch((error) => {
+      if (!stopped && current === generation) cb.onError?.(String(error));
     });
   };
 
@@ -90,8 +107,9 @@ export function watchStream(member: string, canvas: HTMLCanvasElement, cb: Watch
       return;
     }
     const key = p.kind === STREAM_KIND_KEY;
+    const expected = generation;
     void configuring.then(() => {
-      if (!decoder || decoder.state !== "configured") return;
+      if (stopped || generation !== expected || !decoder || decoder.state !== "configured") return;
       if (waitKey && !key) return;
       if (decoder.decodeQueueSize > 3 && !key) {
         waitKey = true; // falling behind: skip to the next key frame (deltas need every predecessor)
@@ -106,9 +124,23 @@ export function watchStream(member: string, canvas: HTMLCanvasElement, cb: Watch
     });
   };
 
+  return {
+    onPacket,
+    stop() {
+      stopped = true;
+      if (raf) cancelAnimationFrame(raf);
+      pending?.close();
+      reset();
+    },
+  };
+}
+
+export function watchStream(member: string, canvas: HTMLCanvasElement, cb: WatchCallbacks = {}): WatchHandle {
+  const decoder = createStreamDecoder(canvas, cb);
   const offEnded = on("stream_ended", (e) => e.member === member && cb.onEnded?.());
+  let stopped = false;
   let watching = false;
-  void makeChannel(onPacket).then((channel) => {
+  void makeChannel(decoder.onPacket).then((channel) => {
     if (stopped) return;
     watching = true;
     call("watch", { member, channel }).catch((e) => cb.onError?.(String(e)));
@@ -119,9 +151,7 @@ export function watchStream(member: string, canvas: HTMLCanvasElement, cb: Watch
       if (stopped) return;
       stopped = true;
       offEnded();
-      if (raf) cancelAnimationFrame(raf);
-      pending?.close();
-      reset();
+      decoder.stop();
       if (watching) void call("unwatch", { member }).catch(() => {});
     },
   };

@@ -28,7 +28,7 @@ export function Dialogs() {
             big
               ? "h-[min(600px,calc(100vh-48px))] w-[min(820px,calc(100vw-32px))] max-w-none sm:max-w-none"
               : kind === "share"
-                ? "w-[440px] sm:max-w-[440px]"
+                ? "w-[min(520px,calc(100dvw-32px))] max-w-none sm:max-w-none"
                 : kind === "profile" ? "w-[min(444px,calc(100dvw-32px))] max-w-none sm:max-w-none" : "w-[380px] sm:max-w-[380px]",
           )}
           aria-describedby={undefined}

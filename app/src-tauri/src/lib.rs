@@ -12,6 +12,11 @@ use serde_json::json;
 use tauri::ipc::{Channel, InvokeBody, InvokeResponseBody, Request};
 use tauri::{AppHandle, Emitter, Manager, State};
 
+#[cfg(windows)]
+mod capture;
+#[cfg(windows)]
+use capture::{capture_preview, capture_sources, capture_start, capture_stop};
+
 type R<T> = Result<T, String>;
 
 fn e(err: anyhow::Error) -> String {
@@ -357,8 +362,16 @@ async fn pump(app: AppHandle, node: Node, mut rx: tokio::sync::mpsc::UnboundedRe
                 json!({ "kind": if error { "error" } else { "info" }, "text": text }),
             ),
             Event::StreamEnded(m) => app.emit("stream_ended", json!({ "member": m })),
-            Event::StreamKeyframe => app.emit("stream_keyframe", json!({})),
-            Event::StreamCongested => app.emit("stream_congestion", json!({})),
+            Event::StreamKeyframe => {
+                #[cfg(windows)]
+                app.state::<capture::CaptureState>().feedback(false);
+                app.emit("stream_keyframe", json!({}))
+            }
+            Event::StreamCongested => {
+                #[cfg(windows)]
+                app.state::<capture::CaptureState>().feedback(true);
+                app.emit("stream_congestion", json!({}))
+            }
         };
     }
 }
@@ -513,6 +526,8 @@ pub fn run() {
             }
             tray.build(app)?;
             app.manage(node.clone());
+            #[cfg(windows)]
+            app.manage(capture::CaptureState::default());
             // dev builds and side-by-side test profiles never self-update
             if !cfg!(debug_assertions) && profile().is_none() {
                 tauri::async_runtime::spawn(auto_update(app.handle().clone(), node.clone()));
@@ -558,6 +573,14 @@ pub fn run() {
             stream_start,
             stream_packet,
             stream_stop,
+            #[cfg(windows)]
+            capture_sources,
+            #[cfg(windows)]
+            capture_start,
+            #[cfg(windows)]
+            capture_stop,
+            #[cfg(windows)]
+            capture_preview,
             watch,
             unwatch,
         ])
@@ -565,6 +588,8 @@ pub fn run() {
         .expect("failed to build app")
         .run(|app, ev| {
             if let tauri::RunEvent::Exit = ev {
+                #[cfg(windows)]
+                app.state::<capture::CaptureState>().cancel();
                 let n = app.state::<Node>().inner().clone();
                 tauri::async_runtime::block_on(n.shutdown());
             }

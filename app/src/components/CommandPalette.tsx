@@ -10,7 +10,7 @@ export function CommandPalette() {
   const open = useApp((s) => s.palette);
   const snap = useApp((s) => s.snap!);
   const spaceId = useApp((s) => s.space);
-  const sharing = useApp((s) => !!s.localStream);
+  const sharing = useApp((s) => s.nativeShare || !!s.localStream);
   const { setPalette, select, openDialog, setMembersOpen } = useApp.getState();
   const space = snap.spaces.find((s) => s.id === spaceId) ?? null;
   const v = snap.voice;

@@ -216,7 +216,7 @@ function VoiceDock() {
   const v = useApp((s) => s.snap!.voice!);
   const me = useApp((s) => s.snap!.me);
   const ptt = useApp((s) => s.snap!.settings.push_to_talk && s.snap!.settings.ptt_key);
-  const sharing = useApp((s) => !!s.localStream);
+  const sharing = useApp((s) => s.nativeShare || !!s.localStream);
   const space = useApp((s) => s.snap!.spaces.find((x) => x.id === v.space));
   const room = space?.channels.find((c) => c.id === v.channel);
   const meter = useMemo(() => levelRef(me.id), [me.id]);

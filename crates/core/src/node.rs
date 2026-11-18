@@ -47,8 +47,14 @@ pub(crate) struct MyVoice {
 }
 
 pub(crate) struct Watcher {
-    pub tx: mpsc::Sender<(std::time::Instant, Arc<Vec<u8>>)>,
+    pub tx: mpsc::Sender<WatchPacket>,
     pub skipping: bool,
+}
+
+pub(crate) struct WatchPacket {
+    pub at: std::time::Instant,
+    pub data: Arc<Vec<u8>>,
+    pub config: Option<Arc<Vec<u8>>>,
 }
 
 pub(crate) struct PendingJoin {
@@ -68,7 +74,7 @@ pub(crate) struct St {
     pub joins: HashMap<Id, PendingJoin>,
     pub watchers: HashMap<Id, Watcher>,
     pub stream_config: Option<Arc<Vec<u8>>>,
-    pub watching: HashMap<Id, (StreamSink, Arc<std::sync::atomic::AtomicU64>)>,
+    pub watching: HashMap<Id, (StreamSink, Arc<Mutex<Option<u64>>>)>,
     pub online: bool,
     /// Local mic test outside rooms (settings meter); sends nothing.
     pub mic_test: Option<Voice>,
@@ -718,9 +724,27 @@ impl Node {
     // ------------------------------------------------------------------ screen share
 
     pub fn stream_start(&self) -> Result<()> {
+        self.stream_start_in(None)
+    }
+
+    pub fn stream_room(&self) -> Result<Id> {
+        let st = self.0.st.lock();
+        let v = st.voice.as_ref().context("önce bir sesli odaya katıl")?;
+        ensure!(
+            st.spaces[&v.space].state.can_in(&self.0.me, &v.channel, Perms::STREAM),
+            "bu odada yayın yetkin yok"
+        );
+        Ok(v.channel)
+    }
+
+    pub fn stream_start_in(&self, channel: Option<Id>) -> Result<()> {
         let i = &self.0;
         let mut st = i.st.lock();
         let v = st.voice.as_ref().context("önce bir sesli odaya katıl")?;
+        ensure!(
+            channel.is_none_or(|channel| channel == v.channel),
+            "ses odası değişti"
+        );
         ensure!(
             st.spaces[&v.space]
                 .state
@@ -745,15 +769,24 @@ impl Node {
         let pkt = Arc::new(pkt);
         let now = std::time::Instant::now();
         if pkt[0] == 0 {
-            st.stream_config = Some(pkt.clone());
+            st.stream_config = Some(pkt);
+            for w in st.watchers.values_mut() {
+                w.skipping = true;
+            }
+            return Ok(());
         }
         let key = pkt[0] == 1;
+        let config = key.then(|| st.stream_config.clone()).flatten();
         let mut want_key = false;
         for w in st.watchers.values_mut() {
-            if w.skipping && !key && pkt[0] != 0 {
+            if w.skipping && !key {
                 continue;
             }
-            match w.tx.try_send((now, pkt.clone())) {
+            match w.tx.try_send(WatchPacket {
+                at: now,
+                data: pkt.clone(),
+                config: config.clone(),
+            }) {
                 Ok(()) => w.skipping = false,
                 Err(_) => {
                     w.skipping = true;
@@ -770,8 +803,15 @@ impl Node {
     }
 
     pub fn stream_stop(&self) {
+        self.stream_stop_in(None);
+    }
+
+    pub fn stream_stop_in(&self, channel: Option<Id>) {
         let i = &self.0;
         let mut st = i.st.lock();
+        if channel.is_some_and(|channel| st.voice.as_ref().is_none_or(|v| v.channel != channel)) {
+            return;
+        }
         stop_stream_locked(&mut st);
         crate::net::voice_changed(i, &mut st);
         drop(st);
@@ -795,7 +835,7 @@ impl Node {
             .try_send(Frame::Watch { on: true })
             .ok()
             .context("bağlantı meşgul")?;
-        st.watching.insert(member, (sink, Arc::new(0.into())));
+        st.watching.insert(member, (sink, Arc::new(Mutex::new(None))));
         Ok(())
     }
 

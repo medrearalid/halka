@@ -31,6 +31,7 @@ interface AppState extends Persisted {
   msgs: Record<Id, ChannelMsgs>;
   toasts: Toast[];
   localStream: MediaStream | null;
+  nativeShare: boolean;
   dialog: { kind: DialogKind; tab?: string } | { kind: "profile"; member: Id; space: Id | null; trigger: HTMLElement | null } | null;
   palette: boolean;
   voiceChatOpen: boolean;
@@ -78,6 +79,7 @@ export const useApp = create<AppState>()((set, get) => ({
   msgs: {},
   toasts: [],
   localStream: null,
+  nativeShare: false,
   dialog: null,
   palette: false,
   voiceChatOpen: true,

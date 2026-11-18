@@ -3,7 +3,6 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail, ensure};
@@ -13,7 +12,7 @@ use tokio::sync::mpsc;
 use crate::api::{ConnKind, Event};
 use crate::id::{self, Id};
 use crate::msg::{self, MsgBody, SignedMsg};
-use crate::node::{Inner, Peer, St, Watcher, msg_view};
+use crate::node::{Inner, Peer, St, WatchPacket, Watcher, msg_view};
 use crate::op::{self, OpBody, SignedOp};
 use crate::perm::Perms;
 use crate::wire::{self, Frame, MAX_FRAME, MAX_HELLO};
@@ -837,9 +836,8 @@ fn handle(i: &Arc<Inner>, remote: Id, f: Frame) -> Result<()> {
             ensure!(st.watchers.len() < 16, "too many watchers");
             let conn = st.peers.get(&remote).context("peer")?.conn.clone();
             let (tx, rx) = mpsc::channel(240);
-            let cfg = st.stream_config.clone();
             st.watchers.insert(remote, Watcher { tx, skipping: true });
-            tokio::spawn(gop_sender(conn, rx, cfg, i.clone()));
+            tokio::spawn(gop_sender(conn, rx, i.clone()));
             drop(st);
             i.emit(Event::StreamKeyframe);
         }
@@ -1212,36 +1210,61 @@ async fn uni_loop(i: Arc<Inner>, conn: Connection, remote: Id) {
     }
 }
 
-/// One GOP stream from a sharer we're watching. A newer GOP supersedes older ones.
+/// One GOP stream from a sharer we're watching. Supersede the old GOP once the new key arrives.
 async fn read_gop(i: &Inner, r: &mut RecvStream, remote: Id) -> Result<()> {
-    let (sink, gen_ctr) =
+    let (sink, current) =
         i.st.lock()
             .watching
             .get(&remote)
             .cloned()
             .context("not watching")?;
-    let my_gen = gen_ctr.fetch_add(1, Ordering::SeqCst) + 1;
-    loop {
-        let mut len = [0u8; 4];
-        if r.read_exact(&mut len).await.is_err() {
+    let index = r.id().index();
+    let Some(first) = read_stream_packet(r).await? else { return Ok(()) };
+    let (config, key) = if first[0] == 0 {
+        let Some(key) = read_stream_packet(r).await? else { return Ok(()) };
+        (Some(first), key)
+    } else {
+        (None, first)
+    };
+    ensure!(key[0] == 1, "GOP has no key frame");
+    {
+        let mut current = current.lock();
+        if current.is_some_and(|active| active >= index) {
             return Ok(());
         }
-        let len = u32::from_le_bytes(len) as usize;
-        ensure!((9..=4 * 1024 * 1024).contains(&len), "bad packet length");
-        let mut pkt = vec![0u8; len];
-        r.read_exact(&mut pkt).await?;
-        if gen_ctr.load(Ordering::SeqCst) != my_gen {
-            return Ok(()); // superseded by a newer GOP
+        *current = Some(index);
+        if let Some(config) = config {
+            sink(config);
         }
+        sink(key);
+    }
+    while let Some(pkt) = read_stream_packet(r).await? {
+        let current = current.lock();
+        if *current != Some(index) {
+            break;
+        }
+        ensure!(pkt[0] == 2, "unexpected packet in GOP");
         sink(pkt);
     }
+    Ok(())
+}
+
+async fn read_stream_packet(r: &mut RecvStream) -> Result<Option<Vec<u8>>> {
+    let mut len = [0u8; 4];
+    if r.read_exact(&mut len).await.is_err() {
+        return Ok(None);
+    }
+    let len = u32::from_le_bytes(len) as usize;
+    ensure!((9..=4 * 1024 * 1024).contains(&len), "bad packet length");
+    let mut packet = vec![0u8; len];
+    r.read_exact(&mut packet).await?;
+    Ok(Some(packet))
 }
 
 /// Sharer side, one task per watcher: each key frame opens a fresh uni stream.
 async fn gop_sender(
     conn: Connection,
-    mut rx: mpsc::Receiver<(Instant, Arc<Vec<u8>>)>,
-    mut cfg: Option<Arc<Vec<u8>>>,
+    mut rx: mpsc::Receiver<WatchPacket>,
     i: Arc<Inner>,
 ) {
     let mut cur: Option<SendStream> = None;
@@ -1250,9 +1273,8 @@ async fn gop_sender(
         s.write_all(p).await?;
         Ok(())
     }
-    while let Some((at, pkt)) = rx.recv().await {
+    while let Some(WatchPacket { at, data: pkt, config }) = rx.recv().await {
         match pkt[0] {
-            0 => cfg = Some(pkt),
             1 => {
                 if let Some(mut s) = cur.take() {
                     let _ = s.finish();
@@ -1264,7 +1286,7 @@ async fn gop_sender(
                 let _ = s.set_priority(-10);
                 let ok = async {
                     s.write_all(&[wire::UNI_STREAM]).await?;
-                    if let Some(c) = &cfg {
+                    if let Some(c) = &config {
                         put(&mut s, c).await?;
                     }
                     put(&mut s, &pkt).await

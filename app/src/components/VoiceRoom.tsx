@@ -6,7 +6,8 @@ import { has, memberOf } from "@/lib/space";
 import { seatAngles } from "@/lib/seats";
 import { joinVoice, shareScreen } from "@/lib/actions";
 import { cn } from "@/lib/utils";
-import { watchStream } from "@/media/watch";
+import { createStreamDecoder, watchStream } from "@/media/watch";
+import { previewShare } from "@/media/share";
 import { Button } from "@/components/ui/button";
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -16,6 +17,7 @@ import { MemberMenuContent } from "./MembersPanel";
 export function VoiceRoom({ space, channel }: { space: SpaceView; channel: ChannelView }) {
   const meId = useApp((s) => s.snap!.me.id);
   const joined = useApp((s) => s.snap!.voice?.channel === channel.id);
+  const sharing = useApp((s) => s.nativeShare || !!s.localStream);
   const spatial = useApp((s) => s.snap!.settings.spatial_audio);
   const [focus, setFocus] = useState<Id | null>(null);
   const streams = channel.streams;
@@ -66,7 +68,7 @@ export function VoiceRoom({ space, channel }: { space: SpaceView; channel: Chann
         {joined ? (
           has(space, "stream") && (
             <Button variant="secondary" size="sm" onClick={shareScreen}>
-              <MonitorUp /> {streams.includes(meId) ? "Paylaşımı durdur" : "Ekranı paylaş"}
+              <MonitorUp /> {sharing ? "Paylaşımı durdur" : "Ekranı paylaş"}
             </Button>
           )
         ) : (
@@ -248,6 +250,7 @@ function StreamTile({
 }) {
   const meId = useApp((s) => s.snap!.me.id);
   const local = useApp((s) => s.localStream);
+  const native = useApp((s) => s.nativeShare);
   const tileRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -262,15 +265,23 @@ function StreamTile({
   }, [self, local]);
 
   useEffect(() => {
-    if (self || !joined || !canvasRef.current) return;
+    if (!joined || !canvasRef.current || (self && !native)) return;
     setState("connecting");
+    if (self) {
+      const decoder = createStreamDecoder(canvasRef.current, {
+        onSize: () => setState("live"),
+        onError: () => setState("error"),
+      });
+      const off = previewShare(decoder.onPacket);
+      return () => { off?.(); decoder.stop(); };
+    }
     const h = watchStream(member, canvasRef.current, {
       onSize: () => setState("live"),
       onError: () => setState("error"),
       onEnded: () => setState("ended"),
     });
     return () => h.stop();
-  }, [self, joined, member]);
+  }, [self, joined, member, self && native]);
 
   const fullscreen = () => {
     const el = tileRef.current;
@@ -292,7 +303,7 @@ function StreamTile({
         focused ? "h-full w-full" : "aspect-video w-full",
       )}
     >
-      {self ? (
+      {self && !native ? (
         <video ref={videoRef} autoPlay muted playsInline className="absolute inset-0 size-full object-contain" />
       ) : (
         <canvas ref={canvasRef} className={cn("absolute inset-0 size-full object-contain transition-opacity duration-200", state === "live" ? "opacity-100" : "opacity-0")} />

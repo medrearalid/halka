@@ -221,6 +221,10 @@ export interface Commands {
   set_settings: { args: { settings: Settings }; ret: void };
 
   // ---- screen share (see "Stream wire format" below)
+  capture_sources: { args: {}; ret: CaptureSource[] };
+  capture_start: { args: { id: string; source: string; preset: string; preview: unknown }; ret: void };
+  capture_stop: { args: { id: string }; ret: void };
+  capture_preview: { args: { id: string; enabled: boolean }; ret: void };
   /** Announce we're sharing in our current voice channel. */
   stream_start: { args: {}; ret: void };
   /** Body is a raw ArrayBuffer packet (NOT json): invoke("stream_packet", packet). */
@@ -244,6 +248,16 @@ export interface Events {
   notice: { kind: "info" | "error"; text: string };
   /** A watched stream ended. */
   stream_ended: { member: Id };
+  capture_ended: { id: string; error: string | null };
+}
+
+export interface CaptureSource {
+  id: string;
+  kind: "monitor" | "window";
+  title: string;
+  width: number;
+  height: number;
+  fps: number;
 }
 
 // ---------------------------------------------------------------- stream wire format

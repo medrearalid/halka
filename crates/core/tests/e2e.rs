@@ -269,6 +269,9 @@ async fn screen_share_flows_to_watcher() {
     a.stream_packet(pkt(2, 1, b"orphan-delta")).unwrap(); // before any key frame: must be skipped
     a.stream_packet(pkt(1, 2, b"key")).unwrap();
     a.stream_packet(pkt(2, 3, b"d1")).unwrap();
+    a.stream_packet(pkt(0, 0, br#"{"codec":"vp8","width":4,"height":2}"#))
+        .unwrap();
+    a.stream_packet(pkt(2, 4, b"delta-before-resized-key")).unwrap();
     a.stream_packet(pkt(1, 4, &vec![7u8; 300_000])).unwrap(); // big key frame, new GOP
     for _ in 0..100 {
         if got.lock().len() >= 5 {
@@ -280,6 +283,7 @@ async fn screen_share_flows_to_watcher() {
         "got kinds: {:?}",
         got.lock().iter().map(|p| p[0]).collect::<Vec<_>>()
     );
+    assert_eq!(&got.lock()[3][9..], br#"{"codec":"vp8","width":4,"height":2}"#);
     let kinds: Vec<u8> = got.lock().iter().map(|p| p[0]).collect();
     assert_eq!(
         kinds,
