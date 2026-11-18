@@ -2,6 +2,7 @@
 //! Every step is mirrored to the UI as an `update` event so the title-bar pill can show it.
 
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use halka_core::Node;
@@ -18,7 +19,8 @@ pub enum Status {
     Checking,
     Downloading { version: String, pct: Option<u8> },
     Ready { version: String },
-    Error { message: String },
+    /// `detail` is the raw error, shown on hover so a failure can be diagnosed without a console.
+    Error { message: String, detail: String },
 }
 
 #[derive(Default)]
@@ -26,6 +28,8 @@ pub struct Updater {
     status: Mutex<Status>,
     retry: Notify,
     now: Notify,
+    /// the next attempt was asked for by the user, so a failed check is worth showing
+    manual: AtomicBool,
 }
 
 fn set(app: &AppHandle, s: Status) {
@@ -41,6 +45,7 @@ pub fn update_status(u: State<Updater>) -> Status {
 /// Check again right away (also cuts a failure back-off short).
 #[tauri::command]
 pub fn update_retry(u: State<Updater>) {
+    u.manual.store(true, Ordering::Relaxed);
     u.retry.notify_one();
 }
 
@@ -64,15 +69,23 @@ fn backoff(fails: u32) -> Duration {
 pub async fn run(app: AppHandle, node: Node) {
     let mut fails = 0;
     loop {
+        let u = app.state::<Updater>();
+        let manual = u.manual.swap(false, Ordering::Relaxed);
         match attempt(&app, &node).await {
             Ok(()) => fails = 0,
             Err(err) => {
                 tracing::warn!("update failed: {err:#}");
                 fails += 1;
-                set(&app, Status::Error { message: friendly(&err) });
+                let checking = matches!(*u.status.lock().unwrap(), Status::Checking);
+                if checking && !manual {
+                    // a background check that fails is retried soon; nothing to bother the user with
+                    set(&app, Status::Idle);
+                } else {
+                    let message = if checking { "Güncellemeler denetlenemedi".into() } else { friendly(&err) };
+                    set(&app, Status::Error { message, detail: format!("{err:#}") });
+                }
             }
         }
-        let u = app.state::<Updater>();
         tokio::select! {
             _ = tokio::time::sleep(backoff(fails)) => {}
             _ = u.retry.notified() => {}

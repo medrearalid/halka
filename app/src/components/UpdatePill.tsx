@@ -16,7 +16,7 @@ export function useUpdateStatus(): UpdateStatus {
   return s;
 }
 
-const BASE = "enter mr-2 flex h-6 items-center gap-1.5 rounded-full border px-2.5 text-2xs tracking-tight";
+const BASE = "enter mr-2 flex h-6 items-center whitespace-nowrap gap-1.5 rounded-full border px-2.5 text-2xs tracking-tight";
 
 /** Title-bar pill: renders nothing while idle, so a normal session never shifts. */
 export function UpdatePill() {
@@ -61,7 +61,14 @@ export function UpdatePill() {
   return (
     <div role="alert" className={`${BASE} border-line-2 bg-paper-1 pr-0.5 text-ink-2`}>
       <span aria-hidden className="size-1.5 rounded-full bg-danger" />
-      <span>{s.message}</span>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span tabIndex={0} className="cursor-default rounded-sm focus-visible:outline-2 focus-visible:outline-copper">{s.message}</span>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-80 font-mono text-2xs break-words" data-selectable>
+          {s.detail}
+        </TooltipContent>
+      </Tooltip>
       <button
         type="button"
         onClick={() => void call("update_retry")}
@@ -85,7 +92,7 @@ export function AppVersion() {
     s.state === "checking" ? "Denetleniyor…"
     : s.state === "downloading" ? `Halka ${s.version} indiriliyor`
     : s.state === "ready" ? `Halka ${s.version} kurulmaya hazır`
-    : s.state === "error" ? s.message
+    : s.state === "error" ? <span data-selectable title={s.detail}>{s.message}: <span className="font-mono">{s.detail}</span></span>
     : asked ? "Halka güncel"
     : "Güncellemeler kendiliğinden kurulur";
   return (

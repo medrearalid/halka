@@ -251,7 +251,7 @@ export type UpdateStatus =
   | { state: "checking" }
   | { state: "downloading"; version: string; pct: number | null }
   | { state: "ready"; version: string }
-  | { state: "error"; message: string };
+  | { state: "error"; message: string; detail: string };
 
 // ---------------------------------------------------------------- events
 // listen(name, e => e.payload)

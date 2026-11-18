@@ -650,7 +650,7 @@ export function createMockBackend(): Backend {
         pct += 7;
         if (fail && pct > 40) {
           clearInterval(t);
-          setUpdate({ state: "error", message: "Güncelleme sunucusuna ulaşılamadı" });
+          setUpdate({ state: "error", message: "Güncelleme sunucusuna ulaşılamadı", detail: "error sending request for url (mock)" });
         } else if (pct >= 100) {
           clearInterval(t);
           setUpdate({ state: "ready", version: "9.9.9" });
