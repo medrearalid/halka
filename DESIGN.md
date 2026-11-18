@@ -28,7 +28,7 @@ glassdock'un imzası: üst kenarda 1px specular parlama, iki tonlu ince kenar (�
 - **Başlıklar:** Her zaman dik; italik başlık yok. Vurgu ağırlıkla ya da bakır renkle yapılır.
 
 ## Düzen
-- **Karşılama:** Üstte Geist başlık ve halka seçimi, alt kenarda üç derinlikte tek renk çizimli kalabalık. Her karakter bir kez görünür. Konuşma çiftleri ve hareketlerin zamanlaması ekrana her girişte çeşitlenir. Tek WebGL tuvali gizli pencerede durur, azaltılmış hareket tercihinde sahne sabittir. Sol menüde halka seçicinin yanındaki ev düğmesi karşılama ekranına döner.
+- **Karşılama:** Üstte Geist başlık ve halka seçimi, alt kenarda iki sıra halinde eşit aralıklı, tek renk çizimli büstlerden oluşan kalabalık. Komşular çiftler halinde birbirine döner; geniş ekranda bir çizim tekrar ederse en az bir düzine kişi uzakta durur. Hareket yalnızca nefes, hafif baş salınımı ve sırayla konuşan çiftlerde küçük baş hareketidir; yüz çizgileri asla bükülmez ve hareket 18 saniyelik kesintisiz bir döngüdür. Çiftler ve zamanlama ekrana her girişte çeşitlenir. Tek WebGL tuvali gizli pencerede durur, azaltılmış hareket tercihinde sahne sabittir. Sol menüde halka seçicinin yanındaki ev düğmesi karşılama ekranına döner.
 - **Kenar çubuğu:** ~220px.
 - **Başlık:** 44px.
 - **Ses kanalı:** Sahne geniş kalır. Yazışma sağda 300px'lik bir sütundur. Container 768px'in altına inince yazışma sahnenin üstüne açılan cam bir çekmeceye dönüşür.
