@@ -117,6 +117,7 @@ pub struct Settings {
     pub vad_threshold: f32,
     /// Hear people from the side of the ring they sit on (stereo panning).
     pub spatial_audio: bool,
+    pub quick_share_full_screen: bool,
     pub input: Option<String>,
     pub output: Option<String>,
 }
@@ -132,6 +133,7 @@ impl Default for Settings {
             ptt_key: "KeyV".into(),
             vad_threshold: 0.3,
             spatial_audio: false,
+            quick_share_full_screen: false,
             input: None,
             output: None,
         }

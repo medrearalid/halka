@@ -1,7 +1,9 @@
 import { useEffect } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useApp } from "@/state/store";
-import { call } from "@/ipc";
+import { call, on } from "@/ipc";
+import { usesNativeCapture } from "@/media/share";
 import { toggleDeafen, toggleMute } from "@/lib/actions";
 import { RingMark } from "@/components/common";
 import { Onboarding } from "@/components/Onboarding";
@@ -18,6 +20,12 @@ function useGlobalKeys() {
       t instanceof HTMLElement && (t.isContentEditable || t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT");
     const capturing = () => document.querySelector("[data-key-capture]") !== null;
     const down = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && useApp.getState().watchFullscreen) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        useApp.setState({ watchFullscreen: null });
+        return;
+      }
       const mod = e.ctrlKey || e.metaKey;
       if (mod && !e.shiftKey && e.key.toLowerCase() === "k") {
         e.preventDefault();
@@ -68,6 +76,34 @@ function useGlobalKeys() {
 
 export function App() {
   useGlobalKeys();
+  const fullscreen = useApp((s) => s.watchFullscreen !== null);
+  useEffect(() => {
+    if (!usesNativeCapture) return;
+    return on("watch_fullscreen", ({ space, channel, member }) => {
+      const app = useApp.getState();
+      if (app.watchFullscreen) {
+        useApp.setState({ watchFullscreen: null });
+        return;
+      }
+      app.select(space, channel);
+      useApp.setState({ watchFullscreen: member, dialog: null, palette: false });
+    });
+  }, []);
+  useEffect(() => {
+    if (!usesNativeCapture) return;
+    const applyFullscreen = async () => {
+      if (fullscreen && document.fullscreenElement) await document.exitFullscreen();
+      if (fullscreen === !!useApp.getState().watchFullscreen) {
+        await getCurrentWindow().setFullscreen(fullscreen);
+      }
+    };
+    void applyFullscreen().catch(() => {
+      if (fullscreen && useApp.getState().watchFullscreen) {
+        useApp.setState({ watchFullscreen: null });
+        useApp.getState().toast("error", "Yayın tam ekran açılamadı.");
+      }
+    });
+  }, [fullscreen]);
   const ready = useApp((s) => s.snap !== null);
   const bootError = useApp((s) => s.bootError);
   const needsOnboarding = useApp((s) => !!s.snap && (!s.snap.me.name.trim() || s.snap.me.name === "Anonim" || s.snap.spaces.length === 0));
@@ -75,7 +111,7 @@ export function App() {
   return (
     <TooltipProvider delayDuration={600} skipDelayDuration={200}>
       <div className="flex h-full flex-col">
-      <TitleBar />
+      {!fullscreen && <TitleBar />}
       <div className="min-h-0 flex-1">
       {bootError ? (
         <div className="grid h-full place-items-center">

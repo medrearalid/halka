@@ -338,24 +338,26 @@ fn unwatch(n: State<Node>, member: Id) {
 
 /// Forward core events to the webview. `Changed` bursts collapse into one snapshot per 60 ms.
 async fn pump(app: AppHandle, node: Node, mut rx: tokio::sync::mpsc::UnboundedReceiver<Event>) {
-    let mut dirty = true;
+    use tokio::time::{timeout_at, Instant};
+    const BATCH: Duration = Duration::from_millis(60);
+    // fixed deadline from the first change: the 50 ms level stream must not keep pushing it back
+    let mut due = Some(Instant::now() + BATCH);
     loop {
-        let ev = if dirty {
-            match tokio::time::timeout(Duration::from_millis(60), rx.recv()).await {
+        let ev = match due {
+            Some(d) => match timeout_at(d, rx.recv()).await {
                 Ok(ev) => ev,
                 Err(_) => {
                     let _ = app.emit("snapshot", node.snapshot());
-                    dirty = false;
+                    due = None;
                     continue;
                 }
-            }
-        } else {
-            rx.recv().await
+            },
+            None => rx.recv().await,
         };
         let Some(ev) = ev else { return };
         let _ = match ev {
             Event::Changed => {
-                dirty = true;
+                due.get_or_insert(Instant::now() + BATCH);
                 Ok(())
             }
             Event::Message(m) => app.emit("message", m),
@@ -400,8 +402,8 @@ fn profile() -> Option<String> {
         .or_else(|| cfg!(debug_assertions).then(|| "dev".into()))
 }
 
-/// Keep capture/encode alive while the window is hidden or occluded (sharing a game, etc.).
-const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,CalculateNativeWinOcclusion --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows";
+/// Keep capture alive in the background and allow the startup cue in the local app.
+const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,CalculateNativeWinOcclusion --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows --autoplay-policy=no-user-gesture-required";
 
 fn show_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
@@ -535,6 +537,63 @@ pub fn run() {
             app.manage(node.clone());
             #[cfg(windows)]
             app.manage(capture::CaptureState::default());
+            // OS-level hotkeys: they fire while a game (or any other app) has focus
+            use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, ShortcutState};
+            let hk = node.clone();
+            app.handle().plugin(
+                tauri_plugin_global_shortcut::Builder::new()
+                    .with_handler(move |_app, s, ev| {
+                        if ev.state != ShortcutState::Pressed {
+                            return;
+                        }
+                        #[cfg(windows)]
+                        if s.key == Code::F9 {
+                            capture::quick_share(_app, &hk);
+                            return;
+                        }
+                        #[cfg(windows)]
+                        if s.key == Code::F10 {
+                            let snapshot = hk.snapshot();
+                            let Some(voice) = snapshot.voice else { return };
+                            let member = snapshot.spaces.iter()
+                                .find(|space| space.id == voice.space)
+                                .and_then(|space| space.channels.iter().find(|channel| channel.id == voice.channel))
+                                .and_then(|channel| channel.streams.iter().find(|&&member| member != snapshot.me.id));
+                            if let Some(member) = member {
+                                show_main(_app);
+                                let _ = _app.emit("watch_fullscreen", json!({
+                                    "space": voice.space, "channel": voice.channel, "member": member,
+                                }));
+                            }
+                            return;
+                        }
+                        let (n, key) = (hk.clone(), s.key);
+                        tauri::async_runtime::spawn_blocking(move || {
+                            let Some(v) = n.snapshot().voice else { return };
+                            let r = match key {
+                                Code::KeyM => n.set_muted(!v.muted),
+                                Code::KeyD => n.set_deafened(!v.deafened),
+                                _ => return,
+                            };
+                            if let Err(e) = r {
+                                tracing::warn!("hotkey {key:?}: {e:#}");
+                            }
+                        });
+                    })
+                    .build(),
+            )?;
+            for k in ["ctrl+shift+m", "ctrl+shift+d"] {
+                // another app may own the combo: the in-window shortcut still works then
+                if let Err(e) = app.global_shortcut().register(k) {
+                    tracing::warn!("global shortcut {k}: {e}");
+                }
+            }
+            #[cfg(windows)]
+            for k in ["ctrl+shift+f9", "ctrl+shift+f10"] {
+                if let Err(e) = app.global_shortcut().register(k) {
+                    tracing::warn!("global shortcut {k}: {e}");
+                }
+            }
             // dev builds and side-by-side test profiles never self-update
             if !cfg!(debug_assertions) && profile().is_none() {
                 tauri::async_runtime::spawn(auto_update(app.handle().clone(), node.clone()));

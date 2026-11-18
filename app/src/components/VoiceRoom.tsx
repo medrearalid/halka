@@ -1,14 +1,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { HeadphoneOff, Headphones, Maximize2, MicOff, Minimize2, MonitorUp, Volume2 } from "lucide-react";
+import { HeadphoneOff, Maximize2, MicOff, Minimize2, MonitorUp, Volume2 } from "lucide-react";
 import type { ChannelView, Id, MemberView, SpaceView } from "@/ipc";
 import { useApp } from "@/state/store";
 import { has, memberOf } from "@/lib/space";
 import { seatAngles } from "@/lib/seats";
-import { joinVoice, shareScreen } from "@/lib/actions";
+import { joinVoice } from "@/lib/actions";
 import { cn } from "@/lib/utils";
 import { createStreamDecoder, watchStream } from "@/media/watch";
 import { previewShare } from "@/media/share";
-import { Button } from "@/components/ui/button";
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { OrbAvatar } from "./OrbAvatar";
@@ -17,11 +16,11 @@ import { MemberMenuContent } from "./MembersPanel";
 export function VoiceRoom({ space, channel }: { space: SpaceView; channel: ChannelView }) {
   const meId = useApp((s) => s.snap!.me.id);
   const joined = useApp((s) => s.snap!.voice?.channel === channel.id);
-  const sharing = useApp((s) => s.nativeShare || !!s.localStream);
-  const spatial = useApp((s) => s.snap!.settings.spatial_audio);
+  const watchFullscreen = useApp((s) => s.watchFullscreen);
   const [focus, setFocus] = useState<Id | null>(null);
   const streams = channel.streams;
-  const focused = focus && streams.includes(focus) ? focus : null;
+  const fullscreenMember = joined && watchFullscreen && streams.includes(watchFullscreen) ? watchFullscreen : null;
+  const focused = fullscreenMember ?? (focus && streams.includes(focus) ? focus : null);
 
   useEffect(() => {
     if (!focused) return;
@@ -30,13 +29,16 @@ export function VoiceRoom({ space, channel }: { space: SpaceView; channel: Chann
     return () => window.removeEventListener("keydown", esc);
   }, [focused]);
 
+  // pb-16 keeps the floating VoiceDock (Shell) clear of the lowest seat
   return (
-    <div className="voice-stage flex min-h-0 min-w-0 flex-1 flex-col">
+    <div className={cn("voice-stage flex min-h-0 min-w-0 flex-1 flex-col", !fullscreenMember && "pb-16")}>
       {/* One tile instance per stream across focus changes, so the decoder never restarts. */}
       {streams.length > 0 && (
         <div
           className={cn(
-            focused
+            fullscreenMember
+              ? "min-h-0 flex-1"
+              : focused
               ? "min-h-0 flex-1 p-3 pb-1"
               : cn("grid max-h-[46%] shrink-0 content-start gap-2 overflow-y-auto p-3 pb-0", streams.length === 1 ? "grid-cols-1 justify-items-center" : "mx-auto w-full max-w-[150vh] grid-cols-2"),
           )}
@@ -51,32 +53,16 @@ export function VoiceRoom({ space, channel }: { space: SpaceView; channel: Chann
                 member={id}
                 joined={joined}
                 focused={id === focused}
-                onToggleFocus={() => setFocus(id === focused ? null : id)}
+                watchFullscreen={id === fullscreenMember}
+                onToggleFocus={() => {
+                  if (!fullscreenMember) setFocus(id === focused ? null : id);
+                }}
               />
             </div>
           ))}
         </div>
       )}
-      {focused ? <SeatStrip space={space} channel={channel} meId={meId} joined={joined} /> : <Ring space={space} channel={channel} meId={meId} joined={joined} />}
-      <footer className="flex h-11 shrink-0 items-center gap-3 border-t border-line bg-paper-1 px-4">
-        <Headphones className="size-3.5 shrink-0 text-ink-3" />
-        <p className="min-w-0 flex-1 truncate text-xs text-ink-3">
-          {spatial
-            ? "Halkadaki yerler duyduğun yönle aynı: soldakini solundan, sağdakini sağından duyarsın."
-            : "Uzamsal ses kapalı: herkesi tam ortadan duyarsın."}
-        </p>
-        {joined ? (
-          has(space, "stream") && (
-            <Button variant="secondary" size="sm" onClick={shareScreen}>
-              <MonitorUp /> {sharing ? "Paylaşımı durdur" : "Ekranı paylaş"}
-            </Button>
-          )
-        ) : (
-          <Button size="sm" onClick={() => void joinVoice(space.id, channel.id)} disabled={!has(space, "speak")}>
-            <Volume2 /> Sesli odaya katıl
-          </Button>
-        )}
-      </footer>
+      {!fullscreenMember && (focused ? <SeatStrip space={space} channel={channel} meId={meId} joined={joined} /> : <Ring space={space} channel={channel} meId={meId} joined={joined} />)}
     </div>
   );
 }
@@ -240,12 +226,14 @@ function StreamTile({
   member,
   joined,
   focused,
+  watchFullscreen,
   onToggleFocus,
 }: {
   space: SpaceView;
   member: Id;
   joined: boolean;
   focused?: boolean;
+  watchFullscreen: boolean;
   onToggleFocus: () => void;
 }) {
   const meId = useApp((s) => s.snap!.me.id);
@@ -284,6 +272,10 @@ function StreamTile({
   }, [self, joined, member, self && native]);
 
   const fullscreen = () => {
+    if (watchFullscreen) {
+      useApp.setState({ watchFullscreen: null });
+      return;
+    }
     const el = tileRef.current;
     if (!el) return;
     if (document.fullscreenElement) void document.exitFullscreen();
@@ -299,7 +291,8 @@ function StreamTile({
         fullscreen();
       }}
       className={cn(
-        "group relative overflow-hidden rounded-lg border border-line bg-paper-0",
+        "group relative overflow-hidden bg-paper-0",
+        !watchFullscreen && "rounded-lg border border-line",
         focused ? "h-full w-full" : "aspect-video w-full",
       )}
     >
@@ -326,9 +319,10 @@ function StreamTile({
       <button
         onClick={(e) => {
           e.stopPropagation();
-          onToggleFocus();
+          if (watchFullscreen) fullscreen();
+          else onToggleFocus();
         }}
-        aria-label={focused ? "Küçült" : "Büyüt"}
+        aria-label={watchFullscreen ? "Tam ekrandan çık" : focused ? "Küçült" : "Büyüt"}
         className="absolute top-2 right-2 grid size-6 place-items-center rounded-md bg-media-scrim text-on-media opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-visible:opacity-100"
       >
         {focused ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}

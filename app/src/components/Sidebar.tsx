@@ -3,8 +3,6 @@ import {
   Check,
   ChevronsUpDown,
   Hash,
-  Headphones,
-  HeadphoneOff,
   Lock,
   LogOut,
   Mic,
@@ -23,7 +21,8 @@ import { useApp } from "@/state/store";
 import { has, memberOf, useSpace } from "@/lib/space";
 import { hueOf, initials } from "@/lib/avatar";
 import { levelRef } from "@/lib/levels";
-import { joinVoice, leaveVoice, shareScreen, toggleDeafen, toggleMute } from "@/lib/actions";
+import { joinVoice, leaveVoice, toggleMute } from "@/lib/actions";
+import { MUTE_SHORTCUT } from "@/lib/shortcutLabels";
 import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
@@ -39,7 +38,7 @@ export function Sidebar() {
   const space = useSpace();
   const inVoice = useApp((s) => !!s.snap?.voice);
   return (
-    <aside className="flex min-h-0 w-[232px] shrink-0 flex-col border-r border-line bg-paper-0">
+    <aside className="flex min-h-0 w-[220px] shrink-0 flex-col border-r border-line bg-paper-0">
       <SpaceSwitcher space={space} />
       <button
         onClick={() => useApp.getState().setPalette(true)}
@@ -50,7 +49,7 @@ export function Sidebar() {
         <Kbd>Ctrl K</Kbd>
       </button>
       {space ? <ChannelList space={space} /> : <div className="flex-1" />}
-      {inVoice && <VoiceDock />}
+      {inVoice && <VoiceStatus />}
       <UserBar />
     </aside>
   );
@@ -152,7 +151,7 @@ function ChannelList({ space }: { space: SpaceView }) {
               aria-current={c.id === active ? "page" : undefined}
               className={cn(
                 "group flex h-7 w-full items-center gap-1.5 rounded-md px-2 text-left text-[13px] transition-colors duration-150 hover:bg-paper-2",
-                c.id === active ? "bg-paper-3 text-ink-1 hover:bg-paper-3" : c.unread ? "font-medium text-ink-1" : "text-ink-2",
+                c.id === active ? "bg-paper-2 text-ink-1 shadow-[inset_2px_0_0_var(--copper)] hover:bg-paper-2" : c.unread ? "font-medium text-ink-1" : "text-ink-2",
               )}
             >
               <Hash className="size-3.5 shrink-0 text-ink-3" />
@@ -188,7 +187,7 @@ function VoiceRow({ space, c, active, joined }: { space: SpaceView; c: ChannelVi
         aria-current={active ? "page" : undefined}
         className={cn(
           "flex h-7 w-full items-center gap-1.5 rounded-md px-2 text-left text-[13px] transition-colors duration-150 hover:bg-paper-2",
-          active ? "bg-paper-3 text-ink-1 hover:bg-paper-3" : "text-ink-2",
+          active ? "bg-paper-2 text-ink-1 shadow-[inset_2px_0_0_var(--copper)] hover:bg-paper-2" : "text-ink-2",
         )}
       >
         <Volume2 className={cn("size-3.5 shrink-0", joined ? "text-live" : "text-ink-3")} />
@@ -212,49 +211,40 @@ function VoiceRow({ space, c, active, joined }: { space: SpaceView; c: ChannelVi
   );
 }
 
-function VoiceDock() {
+/** One line while connected: where you are, a live level hairline, mute and leave. The full controls live in the stage dock. */
+function VoiceStatus() {
   const v = useApp((s) => s.snap!.voice!);
   const me = useApp((s) => s.snap!.me);
   const ptt = useApp((s) => s.snap!.settings.push_to_talk && s.snap!.settings.ptt_key);
-  const sharing = useApp((s) => s.nativeShare || !!s.localStream);
   const space = useApp((s) => s.snap!.spaces.find((x) => x.id === v.space));
   const room = space?.channels.find((c) => c.id === v.channel);
   const meter = useMemo(() => levelRef(me.id), [me.id]);
-  const canStream = has(space, "stream");
+  const small = "size-7 [&_svg]:size-3.5";
   return (
-    <div className="enter border-t border-line px-2 pt-2 pb-1.5">
+    <div className="enter relative flex items-center gap-1 border-t border-line py-1.5 pr-1.5 pl-2">
       <button
         onClick={() => space && room && useApp.getState().select(space.id, room.id)}
-        className="flex w-full items-center gap-2 rounded-md px-1 py-0.5 text-left hover:bg-paper-2"
+        className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-1 text-left hover:bg-paper-2"
+        aria-label={`${room?.name ?? "Ses odası"} odasına git`}
       >
         <span className="relative size-2 shrink-0">
           <span className="absolute inset-0 rounded-full bg-live" />
           <span className="absolute inset-0 animate-[pulse-live_2s_ease-in-out_infinite] rounded-full bg-live" />
         </span>
-        <span className="min-w-0 flex-1">
-          <span className="block text-xs font-medium text-live">Ses bağlı</span>
-          <span className="block truncate text-2xs text-ink-3">
-            {room?.name ?? "…"} · {space?.name}
-          </span>
+        <span className="min-w-0 flex-1 truncate text-xs">
+          <span className="font-medium text-live">{room?.name ?? "…"}</span>
+          <span className="text-ink-3"> · {space?.name}</span>
         </span>
         {ptt && <Kbd>{ptt.replace(/^Key|^Digit/, "")}</Kbd>}
       </button>
-      <div className="mx-1 mt-1.5 mb-1 h-[3px] overflow-hidden rounded-full bg-paper-3" aria-hidden>
-        <div ref={meter} className="h-full origin-left rounded-full bg-live will-change-transform" style={{ transform: "scaleX(var(--lvl))" }} />
-      </div>
-      <div className="grid grid-cols-4 gap-1">
-        <IconBtn label={v.muted ? "Mikrofonu aç" : "Mikrofonu kapat"} shortcut="Ctrl⇧M" onClick={toggleMute} aria-pressed={v.muted} className={cn("w-full", v.muted && "bg-danger-soft text-danger hover:bg-danger-soft hover:text-danger")}>
-          {v.muted ? <MicOff /> : <Mic />}
-        </IconBtn>
-        <IconBtn label={v.deafened ? "Sesi aç" : "Sağırlaştır"} shortcut="Ctrl⇧D" onClick={toggleDeafen} aria-pressed={v.deafened} className={cn("w-full", v.deafened && "bg-danger-soft text-danger hover:bg-danger-soft hover:text-danger")}>
-          {v.deafened ? <HeadphoneOff /> : <Headphones />}
-        </IconBtn>
-        <IconBtn label={sharing ? "Paylaşımı durdur" : "Ekranı paylaş"} onClick={shareScreen} disabled={!canStream} aria-pressed={sharing} className={cn("w-full", sharing && "bg-copper-soft text-copper hover:bg-copper-soft hover:text-copper")}>
-          <MonitorUp />
-        </IconBtn>
-        <IconBtn label="Odadan ayrıl" onClick={leaveVoice} className="w-full hover:bg-danger-soft hover:text-danger">
-          <PhoneOff />
-        </IconBtn>
+      <IconBtn label={v.muted ? "Mikrofonu aç" : "Mikrofonu kapat"} shortcut={MUTE_SHORTCUT} onClick={toggleMute} aria-pressed={v.muted} className={cn(small, v.muted && "bg-danger-soft text-danger hover:bg-danger-soft hover:text-danger")}>
+        {v.muted ? <MicOff /> : <Mic />}
+      </IconBtn>
+      <IconBtn label="Odadan ayrıl" onClick={leaveVoice} className={cn(small, "hover:bg-danger-soft hover:text-danger")}>
+        <PhoneOff />
+      </IconBtn>
+      <div className="absolute inset-x-3 top-0 h-px overflow-hidden" aria-hidden>
+        <div ref={meter} className="h-full origin-left bg-live will-change-transform" style={{ transform: "scaleX(var(--lvl))" }} />
       </div>
     </div>
   );

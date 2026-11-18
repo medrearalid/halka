@@ -1,10 +1,11 @@
-import { useMemo, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, type CSSProperties, type ReactNode } from "react";
 import type { Id } from "@/ipc";
 import { levelRef } from "@/lib/levels";
 import { DEFAULT_ORB, profileColor } from "@/lib/profile";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/state/store";
 import { Avatar } from "./common";
+import { useOrbLayer } from "./OrbLayer";
 
 export function OrbAvatar({ id, name, size, muted, deafened, mini, live, color, photoSrc, children }: {
   id: Id;
@@ -19,15 +20,34 @@ export function OrbAvatar({ id, name, size, muted, deafened, mini, live, color, 
   children?: ReactNode;
 }) {
   const storedColor = useApp((s) => s.snap?.profiles[id]?.orb_color ?? DEFAULT_ORB);
-  const ref = useMemo(() => live ? levelRef(id, "orb") : undefined, [id, live]);
+  const orbColor = color ?? storedColor;
+  const silent = !!(muted || deafened);
+  const layer = useOrbLayer();
+  // Stage seats are drawn on the GPU; mini seats and previews keep the CSS hairline.
+  const gpu = !!(live && !mini && layer);
+  const el = useRef<HTMLSpanElement | null>(null);
+  const level = useMemo(() => (live && !gpu ? levelRef(id) : undefined), [id, live, gpu]);
+  const ref = useCallback(
+    (node: HTMLSpanElement | null) => {
+      el.current = node;
+      return level?.(node);
+    },
+    [level],
+  );
+
+  useEffect(() => {
+    if (!gpu || !el.current) return;
+    return layer!.add(el.current, id, orbColor, silent);
+  }, [gpu, layer, id, orbColor, silent]);
+
   return (
     <span
       ref={ref}
       className={cn("voice-orb relative isolate inline-block shrink-0 align-middle", mini && "voice-orb-mini")}
-      data-silent={!!(muted || deafened)}
-      style={{ width: size, height: size, "--orb-color": profileColor(color ?? storedColor) } as CSSProperties}
+      data-silent={silent}
+      data-gl={gpu}
+      style={{ width: size, height: size, "--orb-color": profileColor(orbColor) } as CSSProperties}
     >
-      <span className="voice-orb-light" aria-hidden />
       <Avatar
         id={id}
         name={name}

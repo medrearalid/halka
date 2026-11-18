@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Hash, HeadphoneOff, Mic, MicOff, MonitorUp, PhoneOff, Plus, Settings, Settings2, Ticket, UserPlus, Users, Volume2, Headphones } from "lucide-react";
 import { useApp } from "@/state/store";
 import { has } from "@/lib/space";
+import { DEAFEN_SHORTCUT, MUTE_SHORTCUT } from "@/lib/shortcutLabels";
 import { joinVoice, leaveVoice, shareScreen, toggleDeafen, toggleMute } from "@/lib/actions";
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandShortcut } from "@/components/ui/command";
 import { SpaceGlyph } from "./Sidebar";
@@ -31,10 +32,10 @@ export function CommandPalette() {
         <CommandGroup heading="Eylemler">
           {v && (
             <>
-              <Item icon={v.muted ? <Mic /> : <MicOff />} onSelect={run(toggleMute)} shortcut="Ctrl⇧M" value="mikrofon sessiz mute">
+              <Item icon={v.muted ? <Mic /> : <MicOff />} onSelect={run(toggleMute)} shortcut={MUTE_SHORTCUT} value="mikrofon sessiz mute">
                 {v.muted ? "Mikrofonu aç" : "Mikrofonu kapat"}
               </Item>
-              <Item icon={v.deafened ? <Headphones /> : <HeadphoneOff />} onSelect={run(toggleDeafen)} shortcut="Ctrl⇧D" value="sağırlaştır deafen kulaklık">
+              <Item icon={v.deafened ? <Headphones /> : <HeadphoneOff />} onSelect={run(toggleDeafen)} shortcut={DEAFEN_SHORTCUT} value="sağırlaştır deafen kulaklık">
                 {v.deafened ? "Sesi aç" : "Sağırlaştır"}
               </Item>
               <Item icon={<MonitorUp />} onSelect={run(shareScreen)} value="ekran paylaş yayın screen share">

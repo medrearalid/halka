@@ -1,21 +1,24 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, ChevronsUpDown, Mic, ShieldCheck, User, X } from "lucide-react";
+import { Check, ChevronsUpDown, Keyboard, Mic, ShieldCheck, User, X } from "lucide-react";
 import { call, type AudioDevices, type Settings } from "@/ipc";
 import { useApp } from "@/state/store";
 import { levelRef } from "@/lib/levels";
 import { fail } from "@/lib/actions";
 import { cn } from "@/lib/utils";
+import { DEAFEN_SHORTCUT, MUTE_SHORTCUT, QUICK_SHARE_SHORTCUT, WATCH_FULLSCREEN_SHORTCUT } from "@/lib/shortcutLabels";
+import { usesNativeCapture } from "@/media/share";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Avatar, Field } from "./common";
+import { Avatar, Field, Kbd } from "./common";
 import { Group, PaneTitle, Row, SettingsLayout, type Tab } from "./SettingsLayout";
 
-type TabId = "profile" | "audio" | "privacy";
+type TabId = "profile" | "audio" | "shortcuts" | "privacy";
 const TABS: Tab<TabId>[] = [
   { id: "profile", label: "Profil", icon: <User /> },
   { id: "audio", label: "Ses ve görüntü", icon: <Mic /> },
+  { id: "shortcuts", label: "Kısayollar", icon: <Keyboard /> },
   { id: "privacy", label: "Gizlilik ve ağ", icon: <ShieldCheck /> },
 ];
 
@@ -39,8 +42,37 @@ export function AppSettings() {
   const [tab, setTab] = useState<TabId>("profile");
   return (
     <SettingsLayout title="Ayarlar" subtitle="Bu cihaz için" tabs={TABS} tab={tab} setTab={setTab}>
-      {tab === "profile" ? <Profile /> : tab === "audio" ? <Audio /> : <Privacy />}
+      {tab === "profile" && <Profile />}
+      {tab === "audio" && <Audio />}
+      {tab === "shortcuts" && <Shortcuts />}
+      {tab === "privacy" && <Privacy />}
     </SettingsLayout>
+  );
+}
+
+function Shortcuts() {
+  const fullScreen = useApp((s) => s.snap!.settings.quick_share_full_screen);
+  return (
+    <>
+      <PaneTitle title="Kısayollar" />
+      <Group>
+        <Row label="Mikrofonu aç/kapat"><Kbd>{MUTE_SHORTCUT}</Kbd></Row>
+        <Row label="Sağırlaştırmayı aç/kapat"><Kbd>{DEAFEN_SHORTCUT}</Kbd></Row>
+        {usesNativeCapture && (
+          <>
+            <Row label="Hızlı ekran paylaşımı" desc="Yayını başlatır veya durdurur. Halka arka plandayken de çalışır.">
+              <Kbd>{QUICK_SHARE_SHORTCUT}</Kbd>
+            </Row>
+            <Row label="Tüm ekranı paylaş" desc="Kapalıyken öndeki pencere, açıkken o pencerenin bulunduğu ekran paylaşılır.">
+              <Switch checked={fullScreen} onCheckedChange={(value) => saveSettings({ quick_share_full_screen: value })} aria-label="Hızlı paylaşımda tüm ekranı paylaş" />
+            </Row>
+            <Row label="Yayını tam ekran izle" desc="Ses odandaki yayını öne getirir. Tekrar basarak tam ekrandan çıkabilirsin.">
+              <Kbd>{WATCH_FULLSCREEN_SHORTCUT}</Kbd>
+            </Row>
+          </>
+        )}
+      </Group>
+    </>
   );
 }
 
@@ -85,6 +117,7 @@ function DevicePicker({ label, value, options, onChange }: { label: string; valu
 
 function Audio() {
   const settings = useApp((s) => s.snap!.settings);
+  const statusSounds = useApp((s) => s.statusSounds);
   const meId = useApp((s) => s.snap!.me.id);
   const inVoice = useApp((s) => !!s.snap!.voice);
   const [dev, setDev] = useState<AudioDevices | null>(null);
@@ -151,6 +184,11 @@ function Audio() {
             ))
           )}
         </div>
+      </Group>
+      <Group title="Ses efektleri">
+        <Row label="Durum sesleri" desc="Bağlantı, ses odası ve susturma değişikliklerinde kısa bir ses çal.">
+          <Switch checked={statusSounds} onCheckedChange={useApp.getState().setStatusSounds} aria-label="Durum sesleri" />
+        </Row>
       </Group>
       <Group title="İşleme">
         <Row label="Akıllı gürültü engelleme" desc="Yapay zekâ (RNNoise) yalnızca konuşmayı geçirir; klavye, fare ve fan sesi gönderilmez.">

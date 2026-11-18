@@ -1,18 +1,17 @@
 //! Windows Graphics Capture producer for the existing Halka stream protocol.
 mod encode;
+mod feedback;
 mod sources;
 
-use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, ensure};
 use halka_core::{Node, id::Id};
-use tauri::ipc::{Channel, InvokeResponseBody};
-use tauri::{AppHandle, Emitter, State};
-use windows::Graphics::Capture::{
-    Direct3D11CaptureFramePool, GraphicsCaptureItem, GraphicsCaptureSession,
-};
+use tauri::ipc::{Channel, InvokeResponseBody, JavaScriptChannelId};
+use tauri::{AppHandle, Emitter, Manager, State, Webview};
+use windows::Graphics::Capture::{Direct3D11CaptureFramePool, GraphicsCaptureSession};
 use windows::Graphics::DirectX::{Direct3D11::IDirect3DDevice, DirectXPixelFormat};
 use windows::Win32::Graphics::Direct3D11::*;
 use windows::Win32::Graphics::Dxgi::IDXGIDevice;
@@ -24,7 +23,8 @@ use windows::Win32::System::WinRT::{
 use windows::core::Interface;
 
 use encode::{Device, Encoder, Mode};
-use sources::Source;
+use feedback::Feedback;
+use sources::{Source, Target};
 
 #[derive(Default, Clone)]
 pub struct CaptureState(Arc<Mutex<CaptureSlot>>);
@@ -41,14 +41,16 @@ struct Session {
     cancelled: AtomicBool,
     key: AtomicBool,
     congested: AtomicBool,
-    preview: AtomicBool,
+    preview: Mutex<Option<Channel<InvokeResponseBody>>>,
 }
 
 impl CaptureState {
-    pub fn cancel(&self) {
+    pub fn cancel(&self) -> bool {
         if let Some(session) = &self.0.lock().unwrap().session {
             session.cancelled.store(true, Relaxed);
+            return true;
         }
+        false
     }
 
     pub fn feedback(&self, congestion: bool) {
@@ -82,11 +84,68 @@ pub async fn capture_start(
     id: String,
     source: String,
     preset: String,
-    preview: Channel<InvokeResponseBody>,
 ) -> super::R<()> {
+    spawn_capture(
+        app,
+        node.inner(),
+        state.inner(),
+        id,
+        Target::Listed(source),
+        preset,
+        false,
+    )?
+    .await
+    .map_err(|_| "Ekran paylaşımı başlatılamadı.".to_owned())?
+}
+
+pub fn quick_share(app: &AppHandle, node: &Node) {
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    let state = app.state::<CaptureState>();
+    if state.cancel() {
+        return;
+    }
+    // Take both handles in the shortcut callback, before any background work or focus change.
+    let result = sources::foreground()
+        .map_err(super::e)
+        .and_then(|foreground| {
+            let target = foreground.target(node.settings().quick_share_full_screen);
+            let id = format!("hotkey-{}", SEQUENCE.fetch_add(1, Relaxed));
+            spawn_capture(
+                app.clone(),
+                node,
+                &state,
+                id,
+                target,
+                "balanced".into(),
+                true,
+            )
+        });
+    match result {
+        Ok(ready) => {
+            // The worker reports quick-share completion via capture_ended.
+            drop(ready);
+        }
+        Err(text) => {
+            let _ = app.emit(
+                "notice",
+                serde_json::json!({ "kind": "error", "text": text }),
+            );
+        }
+    }
+}
+
+fn spawn_capture(
+    app: AppHandle,
+    node: &Node,
+    state: &CaptureState,
+    id: String,
+    target: Target,
+    preset: String,
+    quick: bool,
+) -> super::R<tokio::sync::oneshot::Receiver<super::R<()>>> {
     let room = node.stream_room().map_err(super::e)?;
-    let node = node.inner().clone();
-    let state = state.inner().clone();
+    let node = node.clone();
+    let state = state.clone();
     let session = Arc::new(Session {
         id,
         ..Default::default()
@@ -102,19 +161,39 @@ pub async fn capture_start(
         }
         slot.session = Some(session.clone());
     }
+    if quick {
+        let _ = app.emit(
+            "capture_quick_started",
+            serde_json::json!({ "id": session.id }),
+        );
+    }
     let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
     tauri::async_runtime::spawn_blocking(move || {
         let mut ready = Some(ready_tx);
         let mut live = false;
+        let mut feedback = Feedback {
+            app: &app,
+            monitor: None,
+        };
         let result = run(
-            &session, &node, room, &source, &preset, &preview, &mut ready, &mut live,
+            &session,
+            &node,
+            room,
+            &target,
+            &preset,
+            &mut ready,
+            &mut live,
+            &mut feedback,
         );
         if live {
             node.stream_stop_in(Some(room));
         }
+        if ready.is_none() {
+            feedback.send(false);
+        }
         state.0.lock().unwrap().session = None;
         let error = result.err().map(|error| super::e(error));
-        if let Some(ready) = ready {
+        if let Some(ready) = ready.filter(|_| !quick) {
             let _ = ready.send(Err(
                 error.unwrap_or_else(|| "Ekran paylaşımı iptal edildi.".into())
             ));
@@ -125,9 +204,7 @@ pub async fn capture_start(
             );
         }
     });
-    ready_rx
-        .await
-        .map_err(|_| "Ekran paylaşımı başlatılamadı.".to_owned())?
+    Ok(ready_rx)
 }
 
 #[tauri::command]
@@ -145,7 +222,12 @@ pub fn capture_stop(state: State<'_, CaptureState>, id: String) {
 }
 
 #[tauri::command]
-pub fn capture_preview(state: State<'_, CaptureState>, id: String, enabled: bool) {
+pub fn capture_preview(
+    state: State<'_, CaptureState>,
+    webview: Webview,
+    id: String,
+    preview: Option<JavaScriptChannelId>,
+) {
     if let Some(session) = state
         .0
         .lock()
@@ -154,7 +236,8 @@ pub fn capture_preview(state: State<'_, CaptureState>, id: String, enabled: bool
         .as_ref()
         .filter(|session| session.id == id)
     {
-        session.preview.store(enabled, Relaxed);
+        let enabled = preview.is_some();
+        *session.preview.lock().unwrap() = preview.map(|preview| preview.channel_on(webview));
         if enabled {
             session.key.store(true, Relaxed);
         }
@@ -227,14 +310,15 @@ fn run(
     state: &Session,
     node: &Node,
     room: Id,
-    source: &str,
+    target: &Target,
     preset: &str,
-    preview: &Channel<InvokeResponseBody>,
     ready: &mut Option<tokio::sync::oneshot::Sender<super::R<()>>>,
     live: &mut bool,
+    feedback: &mut Feedback<'_>,
 ) -> Result<()> {
     let _runtime = Runtime::media().context("Windows yakalama bileşenleri hazırlanamadı")?;
-    let (item, refresh): (GraphicsCaptureItem, u32) = sources::resolve(source)?;
+    let (item, refresh, monitor) = sources::resolve(target)?;
+    feedback.monitor = monitor;
     if state.cancelled.load(Relaxed) {
         return Ok(());
     }
@@ -270,6 +354,10 @@ fn run(
     if state.cancelled.load(Relaxed) {
         return Ok(());
     }
+    let mut borderless = feedback::borderless_allowed();
+    if borderless {
+        let _ = capture.session.SetIsBorderRequired(false);
+    }
     capture.session.StartCapture()?;
     // The frame pool can get the first image while Media Foundation opens the encoder.
     let (mut rung, mut encoder) = Encoder::select(&device, size, &modes, 0)?;
@@ -288,6 +376,10 @@ fn run(
     let mut overloaded = 0u32;
     let mut rate = encoder.mode.bitrate;
     while !state.cancelled.load(Relaxed) && !closed.load(Relaxed) {
+        if !borderless && feedback::borderless_allowed() {
+            borderless = true;
+            let _ = capture.session.SetIsBorderRequired(false);
+        }
         if checked_room.elapsed() >= Duration::from_millis(250) {
             if node.stream_room().ok() != Some(room) {
                 return Ok(());
@@ -352,6 +444,7 @@ fn run(
                 state.congested.store(true, Relaxed);
                 continue;
             }
+            let preview = state.preview.lock().unwrap().clone();
             if chunk.key {
                 last_key = Some(chunk.timestamp);
                 awaiting_key = false;
@@ -369,7 +462,7 @@ fn run(
                 if config.as_ref() != Some(&header) {
                     node.stream_packet(packet(0, 0, &header))?;
                 }
-                if state.preview.load(Relaxed) {
+                if let Some(preview) = &preview {
                     let _ = preview.send(InvokeResponseBody::Raw(packet(0, 0, &header)));
                 }
                 config = Some(header);
@@ -377,12 +470,14 @@ fn run(
                 continue;
             }
             let data = packet(if chunk.key { 1 } else { 2 }, chunk.timestamp, &chunk.data);
-            if state.preview.load(Relaxed) {
+            if let Some(preview) = &preview {
                 let _ = preview.send(InvokeResponseBody::Raw(data.clone()));
             }
             node.stream_packet(data)?;
             if let Some(tx) = ready.take() {
+                feedback.send(true);
                 let _ = tx.send(Ok(()));
+                feedback::request_borderless();
             }
         }
 

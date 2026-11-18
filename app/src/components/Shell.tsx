@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Hash, Lock, MessageSquare, UserPlus, Users, Volume2, Settings2 } from "lucide-react";
 import { useApp } from "@/state/store";
 import { has, useSpace } from "@/lib/space";
@@ -6,6 +7,8 @@ import { Sidebar } from "./Sidebar";
 import { ChatView } from "./ChatView";
 import { VoiceRoom } from "./VoiceRoom";
 import { MembersPanel } from "./MembersPanel";
+import { OrbStage } from "./OrbLayer";
+import { VoiceDock } from "./VoiceDock";
 import { Empty, IconBtn, RingMark } from "./common";
 
 export function Shell() {
@@ -13,16 +16,23 @@ export function Shell() {
   const channelId = useApp((s) => s.channel);
   const membersOpen = useApp((s) => s.membersOpen);
   const voiceChatOpen = useApp((s) => s.voiceChatOpen);
+  const watchFullscreen = useApp((s) => s.watchFullscreen !== null);
   const channel = space?.channels.find((c) => c.id === channelId) ?? null;
   const { setMembersOpen, setVoiceChatOpen, openDialog } = useApp.getState();
+  useEffect(() => {
+    if (!membersOpen) return;
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && !document.querySelector("[role=dialog]") && setMembersOpen(false);
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, [membersOpen, setMembersOpen]);
   const canSettings =
     !!space && (has(space, "manage_space") || has(space, "manage_channels") || has(space, "manage_roles") || has(space, "ban"));
 
   return (
     <div className="flex h-full min-w-0">
-      <Sidebar />
+      {!watchFullscreen && <Sidebar />}
       <div className="relative flex min-w-0 flex-1 flex-col">
-        <header className="flex h-11 shrink-0 items-center gap-2 border-b border-line px-3">
+        <header className={cn("h-11 shrink-0 items-center gap-2 border-b border-line px-3", watchFullscreen ? "hidden" : "flex")}>
           {channel ? (
             <>
               {channel.kind === "text" ? <Hash className="size-4 text-ink-3" /> : <Volume2 className="size-4 text-ink-3" />}
@@ -65,7 +75,9 @@ export function Shell() {
             <IconBtn
               label={membersOpen ? "Üyeleri gizle" : "Üyeleri göster"}
               side="bottom"
-              aria-pressed={membersOpen}
+              aria-expanded={membersOpen}
+              aria-controls={space ? "members-panel" : undefined}
+              disabled={!space}
               onClick={() => setMembersOpen(!membersOpen)}
               className={cn(membersOpen && "bg-paper-3 text-ink-1")}
             >
@@ -73,8 +85,8 @@ export function Shell() {
             </IconBtn>
           </div>
         </header>
-        <div className="flex min-h-0 flex-1">
-          <main className="@container flex min-w-0 flex-1 flex-col">
+        <div className="relative flex min-h-0 flex-1">
+          <main className="@container relative flex min-w-0 flex-1 flex-col">
             {!space || !channel ? (
               <div className="grid flex-1 place-items-center">
                 <Empty icon={<RingMark size={26} />} title="Burada henüz kanal yok" body="Halka ayarlarından bir metin kanalı ya da ses odası oluştur." />
@@ -82,25 +94,34 @@ export function Shell() {
             ) : channel.kind === "text" ? (
               <ChatView key={channel.id} space={space} channel={channel} />
             ) : (
-              <div key={channel.id} className="flex min-h-0 flex-1 flex-col @2xl:flex-row">
-                <VoiceRoom space={space} channel={channel} />
+              <div key={channel.id} className="relative flex min-h-0 flex-1">
+                <OrbStage className="flex min-h-0 min-w-0 flex-1 flex-col">
+                  <VoiceRoom space={space} channel={channel} />
+                  <div className={cn("pointer-events-none absolute inset-x-0 bottom-4 z-10 justify-center", watchFullscreen ? "hidden" : "flex")}>
+                    <div className="pointer-events-auto">
+                      <VoiceDock space={space} channel={channel} />
+                    </div>
+                  </div>
+                </OrbStage>
+                {/* A slim column beside the stage; on narrow windows it floats over it instead of splitting it. */}
                 <aside
                   id="voice-chat"
                   aria-label={`${channel.name} yazışması`}
                   className={cn(
-                    "min-h-0 min-w-0 shrink-0 basis-[42%] flex-col border-t border-line bg-paper-1 @2xl:w-[min(42%,340px)] @2xl:basis-auto @2xl:border-t-0 @2xl:border-l",
-                    voiceChatOpen ? "flex" : "hidden",
+                    "glass enter absolute top-2 right-2 bottom-2 z-20 min-h-0 w-[min(320px,calc(100%-16px))] flex-col overflow-hidden rounded-lg",
+                    "@3xl:static @3xl:z-auto @3xl:w-[300px] @3xl:shrink-0 @3xl:animate-none @3xl:rounded-none @3xl:border-l @3xl:border-line @3xl:bg-paper-1 @3xl:bg-none @3xl:shadow-none @3xl:backdrop-filter-none @3xl:after:hidden",
+                    voiceChatOpen && !watchFullscreen ? "flex" : "hidden",
                   )}
                 >
-                  <div className="flex h-10 shrink-0 items-center gap-2 border-b border-line px-4 text-xs font-medium text-ink-2">
+                  <div className="flex h-10 shrink-0 items-center gap-2 border-b border-line px-3 text-xs font-medium text-ink-2">
                     <MessageSquare className="size-3.5 text-ink-3" /> Oda yazışması
                   </div>
-                  <ChatView space={space} channel={channel} open={voiceChatOpen} />
+                  <ChatView space={space} channel={channel} open={voiceChatOpen} dense />
                 </aside>
               </div>
             )}
           </main>
-          {membersOpen && space && <MembersPanel space={space} />}
+          {space && !watchFullscreen && <MembersPanel key={space.id} space={space} open={membersOpen} />}
         </div>
       </div>
     </div>

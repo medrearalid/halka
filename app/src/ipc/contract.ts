@@ -128,6 +128,7 @@ export interface Settings {
   vad_threshold: number;
   /** Hear people from the side of the ring they sit on. */
   spatial_audio: boolean;
+  quick_share_full_screen: boolean;
 }
 
 export interface Snapshot {
@@ -223,9 +224,9 @@ export interface Commands {
 
   // ---- screen share (see "Stream wire format" below)
   capture_sources: { args: {}; ret: CaptureSource[] };
-  capture_start: { args: { id: string; source: string; preset: string; preview: unknown }; ret: void };
+  capture_start: { args: { id: string; source: string; preset: string }; ret: void };
   capture_stop: { args: { id: string }; ret: void };
-  capture_preview: { args: { id: string; enabled: boolean }; ret: void };
+  capture_preview: { args: { id: string; preview: unknown }; ret: void };
   /** Announce we're sharing in our current voice channel. */
   stream_start: { args: {}; ret: void };
   /** Body is a raw ArrayBuffer packet (NOT json): invoke("stream_packet", packet). */
@@ -250,6 +251,9 @@ export interface Events {
   /** A watched stream ended. */
   stream_ended: { member: Id };
   capture_ended: { id: string; error: string | null };
+  capture_quick_started: { id: string };
+  capture_feedback: { live: boolean };
+  watch_fullscreen: { space: Id; channel: Id; member: Id };
 }
 
 export interface CaptureSource {

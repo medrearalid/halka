@@ -1,6 +1,7 @@
 // Sharer side: capture screen, encode off the main thread, push packets to the core.
 import { call, isTauri, makeChannel, on } from "@/ipc";
 import { useApp } from "@/state/store";
+import { playStatusSound } from "@/lib/statusSounds";
 import { runEncoder } from "./encoder";
 
 type TrackProcessorCtor = new (init: { track: MediaStreamTrack }) => { readable: ReadableStream<VideoFrame> };
@@ -24,6 +25,7 @@ export interface ShareOptions {
 
 let active: { stop: () => void; preview?: (receiver: (packet: ArrayBuffer) => void) => () => void } | null = null;
 let starting: AbortController | null = null;
+const nativeEnded = new Map<string, (event: { error: string | null }) => void>();
 
 export function isSharing() {
   return active !== null || starting !== null;
@@ -33,15 +35,11 @@ export function previewShare(receiver: (packet: ArrayBuffer) => void) {
   return active?.preview?.(receiver);
 }
 
-async function startNative(opts: ShareOptions, signal: AbortSignal): Promise<boolean> {
-  if (!opts.source) return false;
-  const id = crypto.randomUUID();
+function nativeHandle(id: string) {
   let receiver: ((packet: ArrayBuffer) => void) | undefined;
-  const channel = await makeChannel((packet) => receiver?.(packet));
-  if (signal.aborted) return false;
   const stop = () => {
     receiver = undefined;
-    offEnded();
+    nativeEnded.delete(id);
     if (active === handle) {
       active = null;
       useApp.setState({ nativeShare: false });
@@ -52,40 +50,63 @@ async function startNative(opts: ShareOptions, signal: AbortSignal): Promise<boo
     stop,
     preview(next: (packet: ArrayBuffer) => void) {
       receiver = next;
-      void call("capture_preview", { id, enabled: true }).catch(() => {});
+      void makeChannel((packet) => {
+        if (receiver === next) next(packet);
+      }).then((preview) => {
+        if (receiver === next) return call("capture_preview", { id, preview });
+      }).catch(() => {});
       return () => {
         if (receiver !== next) return;
         receiver = undefined;
-        void call("capture_preview", { id, enabled: false }).catch(() => {});
+        void call("capture_preview", { id, preview: null }).catch(() => {});
       };
     },
   };
-  let ended = false;
-  let endError: string | null = null;
-  const offEnded = on("capture_ended", (event) => {
-    if (event.id !== id) return;
-    ended = true;
-    endError = event.error;
-    if (active === handle && endError) useApp.getState().toast("error", endError);
+  let ended: { error: string | null } | undefined;
+  nativeEnded.set(id, (event) => {
+    ended = event;
+    if (active === handle && event.error) useApp.getState().toast("error", event.error);
     stop();
   });
-  signal.addEventListener("abort", stop, { once: true });
+  return { handle, ended: () => ended };
+}
+
+if (usesNativeCapture) {
+  on("capture_feedback", ({ live }) => {
+    if (useApp.getState().statusSounds) void playStatusSound(live ? "shareStart" : "shareEnd");
+  });
+  on("capture_ended", (event) => nativeEnded.get(event.id)?.(event));
+  on("capture_quick_started", ({ id }) => {
+    active?.stop();
+    active = nativeHandle(id).handle;
+    const app = useApp.getState();
+    useApp.setState({ nativeShare: true });
+    if (app.dialog?.kind === "share") app.closeDialog();
+  });
+}
+
+async function startNative(opts: ShareOptions, signal: AbortSignal): Promise<boolean> {
+  if (!opts.source || signal.aborted) return false;
+  const id = crypto.randomUUID();
+  const { handle, ended } = nativeHandle(id);
+  signal.addEventListener("abort", handle.stop, { once: true });
   try {
-    await call("capture_start", { id, source: opts.source, preset: opts.preset, preview: channel });
-    if (signal.aborted || ended) {
-      stop();
-      if (!signal.aborted && endError) throw new Error(endError);
+    await call("capture_start", { id, source: opts.source, preset: opts.preset });
+    const result = ended();
+    if (signal.aborted || result) {
+      handle.stop();
+      if (!signal.aborted && result?.error) throw new Error(result.error);
       return false;
     }
     active = handle;
     useApp.setState({ nativeShare: true });
     return true;
   } catch (error) {
-    stop();
+    handle.stop();
     if (!signal.aborted) throw error;
     return false;
   } finally {
-    signal.removeEventListener("abort", stop);
+    signal.removeEventListener("abort", handle.stop);
   }
 }
 

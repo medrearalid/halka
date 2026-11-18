@@ -166,6 +166,7 @@ export function createMockBackend(): Backend {
     ptt_key: "KeyV",
     vad_threshold: 0.18,
     spatial_audio: false,
+    quick_share_full_screen: false,
   };
   let voice: Snapshot["voice"] = null;
   let pttDown = false;
@@ -587,7 +588,7 @@ export function createMockBackend(): Backend {
       const s = sp(space);
       need(s, "speak");
       myStreaming = false;
-      voice = { space: s.id, channel, muted: voice?.muted ?? false, deafened: voice?.deafened ?? false };
+      voice = { space: s.id, channel, muted: false, deafened: false };
       setMyVoice();
     },
     voice_leave: () => {
@@ -597,11 +598,10 @@ export function createMockBackend(): Backend {
     },
     set_muted: ({ muted }) => {
       if (voice) voice.muted = muted;
-      if (voice && !muted) voice.deafened = false;
       setMyVoice();
     },
     set_deafened: ({ deafened }) => {
-      if (voice) voice = { ...voice, deafened, muted: deafened ? true : voice.muted };
+      if (voice) voice.deafened = deafened;
       setMyVoice();
     },
     set_ptt: ({ down }) => void (pttDown = down),

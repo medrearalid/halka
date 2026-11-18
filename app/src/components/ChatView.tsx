@@ -13,7 +13,8 @@ const MAX_LEN = 4000;
 const GROUP_MS = 5 * 60_000;
 const DOM_CAP = 300;
 
-export function ChatView({ space, channel, open = true }: { space: SpaceView; channel: ChannelView; open?: boolean }) {
+/** `dense`: the slim voice-room column (smaller avatars, tighter gutters). Text channels get a reading measure instead. */
+export function ChatView({ space, channel, open = true, dense = false }: { space: SpaceView; channel: ChannelView; open?: boolean; dense?: boolean }) {
   const msgs = useApp((s) => s.msgs[channel.id] ?? emptyMsgs);
   const meId = useApp((s) => s.snap!.me.id);
   const voice = channel.kind === "voice";
@@ -60,6 +61,7 @@ export function ChatView({ space, channel, open = true }: { space: SpaceView; ch
           hasMore={msgs.hasMore}
           loading={msgs.loading}
           meId={meId}
+          dense={dense}
           editing={editing}
           setEditing={setEditing}
           onReply={setReplyTo}
@@ -71,6 +73,7 @@ export function ChatView({ space, channel, open = true }: { space: SpaceView; ch
         replyTo={replyTo}
         clearReply={() => setReplyTo(null)}
         onEditLast={() => lastOwn && setEditing(lastOwn)}
+        dense={dense}
       />
     </div>
   );
@@ -101,6 +104,7 @@ function Timeline(props: {
   hasMore: boolean;
   loading: boolean;
   meId: Id;
+  dense: boolean;
   editing: Id | null;
   setEditing: (id: Id | null) => void;
   onReply: (m: MessageView) => void;
@@ -164,7 +168,7 @@ function Timeline(props: {
   return (
     <div className="relative min-h-0 flex-1">
       <div ref={ref} onScroll={onScroll} className="h-full overflow-y-auto [overflow-anchor:none]">
-        <div className="flex min-h-full flex-col justify-end pt-6 pb-3">
+        <div className={cn("flex min-h-full flex-col justify-end pt-6 pb-3", props.dense ? "pt-3" : "mx-auto w-full max-w-[880px]")}>
           {!hasMore && channel.kind === "text" && (
             <div className="px-4 pb-4">
               <div className="text-[15px] font-semibold tracking-tight">#{channel.name}</div>
@@ -183,6 +187,7 @@ function Timeline(props: {
                 key={r.key}
                 m={r.m}
                 head={r.head}
+                dense={props.dense}
                 space={space}
                 mine={r.m.author === meId}
                 canDelete={r.m.author === meId || canModerate}
@@ -251,6 +256,7 @@ export function RichText({ text }: { text: string }) {
 const MessageRow = memo(function MessageRow({
   m,
   head,
+  dense,
   space,
   mine,
   canDelete,
@@ -262,6 +268,7 @@ const MessageRow = memo(function MessageRow({
 }: {
   m: MessageView;
   head: boolean;
+  dense: boolean;
   space: SpaceView;
   mine: boolean;
   canDelete: boolean;
@@ -281,12 +288,12 @@ const MessageRow = memo(function MessageRow({
   }, [confirmDel]);
 
   return (
-    <div data-mid={m.id} className={cn("group relative flex gap-2.5 px-4 hover:bg-paper-2/60", head ? "mt-2.5 pt-0.5" : "")}>
-      <div className="w-7 shrink-0">
+    <div data-mid={m.id} className={cn("group relative flex hover:bg-paper-2/60", dense ? "gap-2 px-3" : "gap-2.5 px-4", head ? (dense ? "mt-2 pt-0.5" : "mt-2.5 pt-0.5") : "")}>
+      <div className={cn("shrink-0", dense ? "w-[22px]" : "w-7")}>
         {head ? (
-          <Avatar id={m.author} name={name} size={28} className={m.reply_to ? "mt-[20px]" : "mt-0.5"} />
+          <Avatar id={m.author} name={name} size={dense ? 22 : 28} className={m.reply_to ? "mt-[20px]" : "mt-0.5"} />
         ) : (
-          <span className="num block pt-[3px] text-right text-[10px] leading-4 text-ink-3 opacity-0 group-hover:opacity-100">{hhmm(m.ts)}</span>
+          !dense && <span className="num block pt-[3px] text-right text-[10px] leading-4 text-ink-3 opacity-0 group-hover:opacity-100">{hhmm(m.ts)}</span>
         )}
       </div>
       <div className="min-w-0 flex-1 pb-px">
@@ -427,12 +434,14 @@ function Composer({
   replyTo,
   clearReply,
   onEditLast,
+  dense,
 }: {
   space: SpaceView;
   channel: ChannelView;
   replyTo: MessageView | null;
   clearReply: () => void;
   onEditLast: () => void;
+  dense: boolean;
 }) {
   const [text, setText] = useState("");
   const ta = useRef<HTMLTextAreaElement>(null);
@@ -456,7 +465,7 @@ function Composer({
   };
 
   return (
-    <div className="shrink-0 px-4 pb-4">
+    <div className={cn("shrink-0", dense ? "px-2.5 pb-2.5" : "mx-auto w-full max-w-[880px] px-4 pb-4")}>
       <div className="rounded-lg border border-line-2 bg-paper-2 transition-[border-color,box-shadow] duration-150 focus-within:border-copper/55 focus-within:shadow-[0_0_0_3px_var(--copper-soft)]">
         {replyTo && (
           <div className="enter flex items-center gap-1.5 border-b border-line px-2.5 py-1.5 text-xs text-ink-3">

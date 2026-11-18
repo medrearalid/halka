@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 use windows::Graphics::Capture::GraphicsCaptureItem;
 use windows::Win32::Foundation::{HWND, LPARAM, RECT};
@@ -15,6 +15,55 @@ pub struct Source {
     width: u32,
     height: u32,
     fps: u32,
+}
+
+pub enum Target {
+    Listed(String),
+    Window { handle: usize, pid: u32, tid: u32 },
+    Monitor(usize),
+}
+
+pub struct Foreground {
+    window: Target,
+    monitor: Target,
+}
+
+impl Foreground {
+    pub fn target(self, full_screen: bool) -> Target {
+        if full_screen {
+            self.monitor
+        } else {
+            self.window
+        }
+    }
+}
+
+pub fn foreground() -> Result<Foreground> {
+    let window = unsafe { GetForegroundWindow() };
+    ensure!(
+        !window.0.is_null(),
+        "Önde paylaşılabilecek bir pencere bulunamadı."
+    );
+    let mut pid = 0;
+    let tid = unsafe { GetWindowThreadProcessId(window, Some(&mut pid)) };
+    let monitor = unsafe { MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST) };
+    Ok(Foreground {
+        window: Target::Window {
+            handle: window.0 as usize,
+            pid,
+            tid,
+        },
+        monitor: Target::Monitor(monitor.0 as usize),
+    })
+}
+
+pub fn foreground_monitor() -> Option<RECT> {
+    let window = unsafe { GetForegroundWindow() };
+    if window.0.is_null() {
+        return None;
+    }
+    let monitor = unsafe { MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST) };
+    display(monitor).map(|info| info.monitorInfo.rcMonitor)
 }
 
 fn display(monitor: HMONITOR) -> Option<MONITORINFOEXW> {
@@ -67,17 +116,14 @@ unsafe extern "system" fn enum_monitor(
     true.into()
 }
 
-unsafe extern "system" fn enum_window(window: HWND, data: LPARAM) -> BOOL {
-    let windows = unsafe { &mut *(data.0 as *mut Vec<Source>) };
+fn window_identity(window: HWND) -> Option<(u32, u32)> {
     let mut pid = 0;
     let tid = unsafe { GetWindowThreadProcessId(window, Some(&mut pid)) };
-    if pid == std::process::id()
-        || tid == 0
+    if tid == 0
         || !unsafe { IsWindowVisible(window) }.as_bool()
         || unsafe { IsIconic(window) }.as_bool()
-        || (unsafe { GetWindowLongW(window, GWL_EXSTYLE) } as u32 & WS_EX_TOOLWINDOW.0) != 0
     {
-        return true.into();
+        return None;
     }
     let mut cloaked = 0u32;
     let _ = unsafe {
@@ -90,7 +136,17 @@ unsafe extern "system" fn enum_window(window: HWND, data: LPARAM) -> BOOL {
     };
     let mut affinity = 0;
     let _ = unsafe { GetWindowDisplayAffinity(window, &mut affinity) };
-    if cloaked != 0 || affinity != 0 {
+    (cloaked == 0 && affinity == 0).then_some((pid, tid))
+}
+
+unsafe extern "system" fn enum_window(window: HWND, data: LPARAM) -> BOOL {
+    let windows = unsafe { &mut *(data.0 as *mut Vec<Source>) };
+    let Some((pid, tid)) = window_identity(window) else {
+        return true.into();
+    };
+    if pid == std::process::id()
+        || (unsafe { GetWindowLongW(window, GWL_EXSTYLE) } as u32 & WS_EX_TOOLWINDOW.0) != 0
+    {
         return true.into();
     }
     let mut title = [0; 512];
@@ -119,26 +175,49 @@ pub fn list() -> Result<Vec<Source>> {
     Ok(sources)
 }
 
-pub fn resolve(id: &str) -> Result<(GraphicsCaptureItem, u32)> {
-    let source = list()?
-        .into_iter()
-        .find(|source| source.id == id)
-        .context("Seçilen ekran veya pencere artık kullanılabilir değil.")?;
-    let handle = source
-        .id
-        .split(':')
-        .nth(1)
-        .context("Kaynak kimliği geçersiz.")?;
-    let handle = usize::from_str_radix(handle, 16)? as *mut core::ffi::c_void;
+pub fn resolve(target: &Target) -> Result<(GraphicsCaptureItem, u32, Option<RECT>)> {
     let interop = factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
-    unsafe {
-        if source.kind == "monitor" {
-            Ok((interop.CreateForMonitor(HMONITOR(handle))?, source.fps))
-        } else {
-            let window = HWND(handle);
-            let monitor = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
-            let fps = display(monitor).as_ref().map_or(60, refresh);
-            Ok((interop.CreateForWindow(window)?, fps))
+    match target {
+        Target::Listed(id) => {
+            let source = list()?
+                .into_iter()
+                .find(|source| source.id == *id)
+                .context("Seçilen ekran veya pencere artık kullanılabilir değil.")?;
+            let mut parts = source.id.split(':').skip(1);
+            let handle =
+                usize::from_str_radix(parts.next().context("Kaynak kimliği geçersiz.")?, 16)?;
+            let target = if source.kind == "monitor" {
+                Target::Monitor(handle)
+            } else {
+                let pid = parts.next().context("Kaynak kimliği geçersiz.")?.parse()?;
+                let tid = parts.next().context("Kaynak kimliği geçersiz.")?.parse()?;
+                Target::Window { handle, pid, tid }
+            };
+            resolve(&target)
+        }
+        Target::Monitor(handle) => {
+            let monitor = HMONITOR(*handle as _);
+            let info = display(monitor).context("Seçilen ekran artık kullanılabilir değil.")?;
+            Ok((
+                unsafe { interop.CreateForMonitor(monitor)? },
+                refresh(&info),
+                Some(info.monitorInfo.rcMonitor),
+            ))
+        }
+        Target::Window { handle, pid, tid } => {
+            let window = HWND(*handle as _);
+            ensure!(
+                window_identity(window) == Some((*pid, *tid)),
+                "Seçilen pencere artık paylaşılabilir değil."
+            );
+            let monitor = unsafe { MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST) };
+            let info = display(monitor);
+            let fps = info.as_ref().map_or(60, refresh);
+            Ok((
+                unsafe { interop.CreateForWindow(window)? },
+                fps,
+                info.map(|info| info.monitorInfo.rcMonitor),
+            ))
         }
     }
 }

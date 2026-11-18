@@ -15,3 +15,7 @@ Owner, Claude and ChatGPT work in the same checkout; ChatGPT commits its own wor
 - Stage only files you changed, by path; never `git add -A`, `git add .` or `git commit -a`. Leave other agents' uncommitted changes alone.
 - A commit is the owner's approval (ChatGPT commits only when the owner asks). Releases (version bump, tag, push) are Claude's job: everything committed on main may ship, uncommitted work never does. No need to ask before tagging.
 - Release profile stays `lto = "fat"`, `codegen-units = 1` (owner's goal: minimal runtime resource use). For local installer tests build from a clean `git worktree` of HEAD (so other agents' uncommitted work stays out) with `CARGO_TARGET_DIR=D:/Projects/bros/target bun x @tauri-apps/cli@2 build --config '{"bundle":{"createUpdaterArtifacts":false}}' -- --profile fastrel` (~1 min, output in target/fastrel/bundle/nsis/).
+
+## UI
+
+All UI work follows `DESIGN.md` (tokens, glass material, density, orb rules) and uses the hallmark + anti-ui-slop skills.

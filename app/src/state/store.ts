@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { call, errText, on, type Id, type MessageView, type Snapshot } from "@/ipc";
+import { playStatusSound, statusCue, stopStatusSound } from "@/lib/statusSounds";
 
 export interface ChannelMsgs {
   items: MessageView[];
@@ -22,6 +23,7 @@ interface Persisted {
   lastChannel: Record<Id, Id>;
   membersOpen: boolean;
   peerVolume: Record<Id, number>;
+  statusSounds: boolean;
 }
 
 interface AppState extends Persisted {
@@ -32,6 +34,7 @@ interface AppState extends Persisted {
   toasts: Toast[];
   localStream: MediaStream | null;
   nativeShare: boolean;
+  watchFullscreen: Id | null;
   dialog: { kind: DialogKind; tab?: string } | { kind: "profile"; member: Id; space: Id | null; trigger: HTMLElement | null } | null;
   palette: boolean;
   voiceChatOpen: boolean;
@@ -45,6 +48,7 @@ interface AppState extends Persisted {
   setMembersOpen(v: boolean): void;
   setPalette(v: boolean): void;
   setVoiceChatOpen(v: boolean): void;
+  setStatusSounds(v: boolean): void;
   setPeerVolume(member: Id, v: number): void;
   loadMessages(space: Id, channel: Id, older?: boolean): Promise<void>;
   trimMessages(channel: Id, keep: number): void;
@@ -54,7 +58,7 @@ const KEY = "halka.ui.v1";
 const PAGE = 50;
 
 function readPersisted(): Persisted {
-  const d: Persisted = { space: null, lastChannel: {}, membersOpen: window.innerWidth >= 1100, peerVolume: {} };
+  const d: Persisted = { space: null, lastChannel: {}, membersOpen: window.innerWidth >= 1100, peerVolume: {}, statusSounds: true };
   try {
     return { ...d, ...(JSON.parse(localStorage.getItem(KEY) ?? "{}") as Partial<Persisted>) };
   } catch {
@@ -80,6 +84,7 @@ export const useApp = create<AppState>()((set, get) => ({
   toasts: [],
   localStream: null,
   nativeShare: false,
+  watchFullscreen: null,
   dialog: null,
   palette: false,
   voiceChatOpen: true,
@@ -87,7 +92,7 @@ export const useApp = create<AppState>()((set, get) => ({
   select(space, channel) {
     pending = { space, channel: channel ?? null, until: Date.now() + 5000 };
     const lastChannel = channel ? { ...get().lastChannel, [space]: channel } : get().lastChannel;
-    set({ space, channel: channel ?? lastChannel[space] ?? null, lastChannel });
+    set({ space, channel: channel ?? lastChannel[space] ?? null, lastChannel, watchFullscreen: null });
     reconcile();
   },
   toast(kind, text) {
@@ -116,6 +121,10 @@ export const useApp = create<AppState>()((set, get) => ({
   },
   setVoiceChatOpen(voiceChatOpen) {
     set({ voiceChatOpen });
+  },
+  setStatusSounds(statusSounds) {
+    if (!statusSounds) stopStatusSound();
+    set({ statusSounds });
   },
   setPeerVolume(member, v) {
     set((s) => ({ peerVolume: { ...s.peerVolume, [member]: v } }));
@@ -174,10 +183,10 @@ function reconcile() {
 }
 
 useApp.subscribe((s, p) => {
-  if (s.space === p.space && s.lastChannel === p.lastChannel && s.membersOpen === p.membersOpen && s.peerVolume === p.peerVolume)
+  if (s.space === p.space && s.lastChannel === p.lastChannel && s.membersOpen === p.membersOpen && s.peerVolume === p.peerVolume && s.statusSounds === p.statusSounds)
     return;
   try {
-    const v: Persisted = { space: s.space, lastChannel: s.lastChannel, membersOpen: s.membersOpen, peerVolume: s.peerVolume };
+    const v: Persisted = { space: s.space, lastChannel: s.lastChannel, membersOpen: s.membersOpen, peerVolume: s.peerVolume, statusSounds: s.statusSounds };
     localStorage.setItem(KEY, JSON.stringify(v));
   } catch {
     /* storage unavailable */
@@ -201,11 +210,20 @@ function markReadSoon(space: Id, channel: Id) {
   }, 600);
 }
 
+function applySnapshot(snap: Snapshot) {
+  const previous = useApp.getState();
+  const cue = previous.statusSounds ? statusCue(previous.snap, snap) : undefined;
+  const voice = snap.voice;
+  const watching = previous.watchFullscreen;
+  const stillWatching = watching && voice && snap.spaces.find((space) => space.id === voice.space)
+    ?.channels.find((channel) => channel.id === voice.channel)?.streams.includes(watching);
+  useApp.setState({ snap, watchFullscreen: stillWatching ? watching : null });
+  reconcile();
+  if (cue) void playStatusSound(cue);
+}
+
 export async function boot() {
-  on("snapshot", (snap) => {
-    useApp.setState({ snap });
-    reconcile();
-  });
+  on("snapshot", applySnapshot);
   on("message", (m) => {
     const s = useApp.getState();
     const cur = s.msgs[m.channel];
@@ -222,8 +240,7 @@ export async function boot() {
   });
   try {
     const snap = await call("snapshot");
-    useApp.setState({ snap });
-    reconcile();
+    if (!useApp.getState().snap) applySnapshot(snap);
     // the core does not report peer volumes back; replay what this device remembers
     for (const [member, volume] of Object.entries(useApp.getState().peerVolume))
       if (volume !== 1) void call("set_peer_volume", { member, volume }).catch(() => {});

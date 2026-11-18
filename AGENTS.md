@@ -10,3 +10,7 @@
 - Commit, sahibin onayı demektir: yalnızca sahip istediğinde commit'le. Commit'lenen her şey bir sonraki release'e girebilir, commit'lenmemiş hiçbir şey giremez.
 - Push etme, tag atma, release çıkarma; sürüm yükseltme, tag ve push Claude'un işidir.
 - Başka bir ajanın commit'lenmemiş değişikliklerine dokunma; geri alma, stash'leme, yeniden yazma.
+
+## Arayüz
+
+- Arayüzde yapılan her değişiklik kökteki `DESIGN.md` dosyasına uyar (renk tokenları, cam malzeme, yoğunluk, orb kuralları). Yeni bir görsel karar gerekiyorsa önce `DESIGN.md` güncellenir.
