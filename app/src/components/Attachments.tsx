@@ -6,6 +6,7 @@ import { fail } from "@/lib/actions";
 import { cn } from "@/lib/utils";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 
 export const MAX_ATTACHMENTS = 10;
 const CHUNK = 4 * 1024 * 1024;
@@ -269,6 +270,7 @@ function InlineImage({ f, m, space, dense }: { f: FileRef; m: MessageView; space
   const file = useFile(f, m);
   const [url, setUrl] = useState<string | null>(null);
   const [broken, setBroken] = useState(false);
+  const [open, setOpen] = useState(false);
   const auto = f.size <= space.auto_image;
   const [w, h] = f.image!;
 
@@ -303,7 +305,27 @@ function InlineImage({ f, m, space, dense }: { f: FileRef; m: MessageView; space
       style={{ width: Math.max(48, Math.round(w * scale)), aspectRatio: `${w} / ${h}`, maxWidth: "100%" }}
     >
       {url ? (
-        <img src={url} alt={f.name} draggable={false} className="block size-full object-cover" />
+        <>
+          <button onClick={() => setOpen(true)} aria-label={`${f.name} büyüt`} className="block size-full cursor-zoom-in">
+            <img src={url} alt={f.name} draggable={false} className="block size-full object-cover" />
+          </button>
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogContent
+              aria-describedby={undefined}
+              className="w-auto max-w-[92vw] gap-0 border-0 bg-transparent p-0 shadow-none sm:max-w-[92vw]"
+            >
+              <DialogTitle className="sr-only">{f.name}</DialogTitle>
+              <img
+                src={url}
+                alt={f.name}
+                draggable={false}
+                onClick={() => setOpen(false)}
+                className="block max-h-[88vh] max-w-[92vw] cursor-zoom-out rounded-md object-contain"
+                style={{ aspectRatio: `${w} / ${h}` }}
+              />
+            </DialogContent>
+          </Dialog>
+        </>
       ) : broken || file.failed ? (
         <div className="absolute inset-0 grid place-items-center text-ink-3">
           <button onClick={() => (setBroken(false), file.fetch())} className="flex flex-col items-center gap-1 text-2xs hover:text-ink-1">
