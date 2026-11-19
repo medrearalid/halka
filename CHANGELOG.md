@@ -2,6 +2,15 @@
 
 Her sürüm `## <sürüm>` başlığıyla başlar. Maddeler kullanıcıya dönük ve Türkçedir; uygulamadaki "Neler değişti" kartı ve GitHub sürüm sayfası bu dosyadan beslenir.
 
+## 0.1.7
+
+- Dosya ve görsel gönderebilirsin: ataş düğmesi, sürükle-bırak ya da panodaki ekran görüntüsünü doğrudan yapıştırma.
+- Görseller indirmeye gerek kalmadan sohbette görünür; gönderilmeden önce konum gibi gizli bilgileri silinir.
+- Relay'siz halkalarda 500 MB'a, relay şart halkalarda 50 MB'a kadar dosya gönderilebilir. Çalıştırılabilir dosyalar kaydedilmeden önce uyarır.
+- Süreli mesajlar: mesaja süre koyabilirsin, kanalın varsayılan süresi de ayarlanabilir. Süre dolunca mesaj her yerden kalkar.
+- Silinen ve süresi dolan mesajlar diskte de geri getirilemez; her mesaj kendi anahtarıyla şifrelenir ve anahtar silinir.
+- Relay şart halkalarda süreli mesajlar yalnızca bellekte tutulur.
+
 ## 0.1.6
 
 - Halka oluştururken "Relay şart" seçebilirsin: üyeler yalnızca relay üzerinden bağlanır, IP adresleri birbirinden gizli kalır.
