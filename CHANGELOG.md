@@ -2,6 +2,10 @@
 
 Her sürüm `## <sürüm>` başlığıyla başlar. Maddeler kullanıcıya dönük ve Türkçedir; uygulamadaki "Neler değişti" kartı ve GitHub sürüm sayfası bu dosyadan beslenir.
 
+## 0.1.8
+
+- Sohbetteki görsele tıklayınca büyük açılıyor; dışına tıklayarak ya da Esc ile kapanıyor.
+
 ## 0.1.7
 
 - Dosya ve görsel gönderebilirsin: ataş düğmesi, sürükle-bırak ya da panodaki ekran görüntüsünü doğrudan yapıştırma.
