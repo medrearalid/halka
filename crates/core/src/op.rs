@@ -100,6 +100,11 @@ pub enum OpBody {
     RequireRelay,
     /// Owner ends the space for everyone. Clears membership, so every removal path drops it.
     DeleteSpace,
+    /// Default lifetime for new messages in a channel; senders may only shorten it.
+    SetChannelTtl {
+        channel: Id,
+        ttl_ms: Option<u32>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -200,6 +205,7 @@ impl SignedOp {
                             "too many roles"
                         );
                     }
+                    OpBody::SetChannelTtl { ttl_ms, .. } => crate::msg::check_ttl(*ttl_ms)?,
                     _ => {}
                 }
             }

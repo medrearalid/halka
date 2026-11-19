@@ -66,21 +66,21 @@ fn dpapi(data: &[u8], protect: bool) -> Result<Vec<u8>> {
 }
 
 #[cfg(windows)]
-fn seal(d: &[u8]) -> Result<Vec<u8>> {
+pub(crate) fn seal(d: &[u8]) -> Result<Vec<u8>> {
     dpapi(d, true)
 }
 #[cfg(windows)]
-fn unseal(d: &[u8]) -> Result<Vec<u8>> {
+pub(crate) fn unseal(d: &[u8]) -> Result<Vec<u8>> {
     dpapi(d, false)
 }
 
 // shortcut: other platforms store the key unsealed in the (user-private) data dir; upgrade to the
 // OS keychain when non-Windows builds matter.
 #[cfg(not(windows))]
-fn seal(d: &[u8]) -> Result<Vec<u8>> {
+pub(crate) fn seal(d: &[u8]) -> Result<Vec<u8>> {
     Ok(d.to_vec())
 }
 #[cfg(not(windows))]
-fn unseal(d: &[u8]) -> Result<Vec<u8>> {
+pub(crate) fn unseal(d: &[u8]) -> Result<Vec<u8>> {
     Ok(d.to_vec())
 }

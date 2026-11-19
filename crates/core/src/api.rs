@@ -28,6 +28,8 @@ pub struct ChannelView {
     pub voice: Vec<Id>,
     pub streams: Vec<Id>,
     pub unread: u32,
+    /// Default message lifetime; senders may only shorten it.
+    pub ttl_ms: Option<u32>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -86,6 +88,9 @@ pub struct SpaceView {
     pub owner: Id,
     /// Members connect only through relays; inactive here until relay-only is on.
     pub relay_required: bool,
+    /// Trust tier limits: largest attachment, and largest image that loads without a click.
+    pub max_file: u64,
+    pub auto_image: u64,
     pub my_perms: Vec<String>,
     pub channels: Vec<ChannelView>,
     pub roles: Vec<RoleView>,
@@ -104,7 +109,9 @@ pub struct MessageView {
     pub text: String,
     pub reply_to: Option<Id>,
     pub edited: bool,
-    pub deleted: bool,
+    /// Unix ms when the message vanishes everywhere.
+    pub expires: Option<u64>,
+    pub files: Vec<crate::msg::FileRef>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -175,6 +182,14 @@ pub enum Event {
     /// State changed; the shell should send a fresh snapshot (it debounces).
     Changed,
     Message(MessageView),
+    /// Messages purged (deleted or expired): (space, channel, id).
+    Removed(Vec<(Id, Id, Id)>),
+    /// A file transfer advanced: bytes stored so far of `size` (`have == size`: ready).
+    FileProgress {
+        hash: Id,
+        have: u64,
+        size: u64,
+    },
     Levels(Vec<(Id, f32)>),
     Notice {
         error: bool,

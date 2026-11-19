@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { TTL_OPTIONS } from "./Attachments";
 import { ArrowDown, ArrowUp, Ban, ChevronRight, Hash, Lock, Plus, Settings2, Shield, ShieldCheck, Ticket, Users, Volume2 } from "lucide-react";
 import { enableRelay } from "@/lib/relay";
 import { MemberManagement } from "./MembersPanel";
@@ -339,10 +340,14 @@ function ChannelEditor({ space, channel, onDone }: { space: SpaceView; channel?:
   const [name, setName] = useState(channel?.name ?? "");
   const [kind, setKind] = useState<ChannelKind>(channel?.kind ?? "text");
   const [priv, setPriv] = useState<Id[] | null>(channel?.private_roles ?? null);
+  const [ttl, setTtl] = useState(String(channel?.ttl_ms ?? "off"));
   const save = useSubmit(async () => {
     const n = name.trim();
-    if (channel) await call("update_channel", { space: space.id, channel: channel.id, name: n, privateRoles: priv });
-    else await call("create_channel", { space: space.id, name: n, kind, privateRoles: priv });
+    if (channel) {
+      await call("update_channel", { space: space.id, channel: channel.id, name: n, privateRoles: priv });
+      const next = ttl === "off" ? null : Number(ttl);
+      if (next !== channel.ttl_ms) await call("set_channel_ttl", { space: space.id, channel: channel.id, ttlMs: next });
+    } else await call("create_channel", { space: space.id, name: n, kind, privateRoles: priv });
   }, onDone);
   const toggleRole = (id: Id) => setPriv((p) => (p ?? []).includes(id) ? (p ?? []).filter((x) => x !== id) : [...(p ?? []), id]);
   return (
@@ -382,6 +387,20 @@ function ChannelEditor({ space, channel, onDone }: { space: SpaceView; channel?:
               {r.name}
             </button>
           ))}
+        </div>
+      )}
+      {channel && (
+        <div className="flex flex-col gap-1.5">
+          <div>
+            <div className="text-[13px]">Süreli mesajlar</div>
+            <div className="text-xs text-ink-3">Yeni mesajlar en geç bu süre dolunca her cihazdan geri dönüşsüz silinir. Gönderen süreyi kısaltabilir, uzatamaz.</div>
+          </div>
+          <Segmented
+            value={ttl}
+            onChange={setTtl}
+            options={[{ value: "off", label: "Kapalı" }, ...TTL_OPTIONS.map((o) => ({ value: String(o.ms), label: o.short }))]}
+            className="w-fit"
+          />
         </div>
       )}
       {save.error && <p className="text-xs text-danger">{save.error}</p>}

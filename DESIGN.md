@@ -51,6 +51,12 @@ glassdock'un imzası: üst kenarda 1px specular parlama, iki tonlu ince kenar (�
 - **Geri bildirim:** Başarı sessizdir; onay diyaloğu yerine geri alınabilir eylem tercih edilir.
 - **Süreler:** 150 ms (`--dur-1`) ve 200 ms (`--dur-2`). Easing için `--ease-out` kullanılır; zıplama yok.
 
+## Ekler ve süreli mesajlar
+- **Ekleme:** Yazı kutusuna yapıştırma, sohbete sürükle-bırak (kesik bakır çerçeveli "Eklemek için bırak" katmanı) ve ataş düğmesi. Ekler yazı kutusunun üstünde 48px yüksekliğinde çipler olarak durur: görselde küçük önizleme, dosyada ikon; yüklenirken altta 1px bakır ilerleme çizgisi.
+- **Görseller:** Gönderilmeden önce WebP'ye çevrilir. Mesajda imzalı boyuttan ayrılan kutuda gösterilir (en fazla 400×320, dar sütunda 240 genişlik), bu yüzden yüklenirken layout-shift olmaz. Kademe sınırını aşan görsel "Görseli yükle · boyut" hapıyla bekler.
+- **Dosya kartı:** 48px, ad + `tabular-nums` boyut, sağda tek eylem (İndir → Kaydet → Göster). Çalıştırılabilir dosyada ikon `--warn` olur ve Kaydet iki adımlıdır.
+- **Süre:** Yazı kutusunda `Timer` ikonu; süre seçiliyse bakır renkte kısa etiket (`5 dk`). Süreli mesajın başlığında bakır `tabular-nums` geri sayım çipi durur. Süresi dolan ya da silinen mesaj yer tutucu bırakmadan kaybolur.
+
 ## Kurulum ve güncelleme
 - **Installer:** Açık tema (açık `--paper-1` zemin, `--ink-1` metin, bakır ilerleme). Karşılama sayfasında solda uygulama simgesi, "Halka" yazısı ve geliştirici adı (Guney); sağda tek paragraf tanıtım. Ardından kurulum klasörü seçimi ve ilerleme sayfası gelir; bitiş sayfası yoktur, kurulum bitince uygulama kendiliğinden açılır. Alt satırda telif (© Guney) durur. Güncellemeler bu ekranları göstermez, sessiz kurulur.
 - **Güncelleme hapı:** Başlık çubuğunda, pencere kontrollerinin solunda `rounded-full`, 11px bir hap. Boştayken hiç yer kaplamaz. İndirirken `tabular-nums` yüzde ve 1px bakır ilerleme çizgisi gösterir. Hazır olduğunda "Yeniden başlat" bakır renkli birincil eylemdir. Hatada `--danger` noktası ve "Tekrar dene" bulunur.

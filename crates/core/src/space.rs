@@ -40,6 +40,7 @@ pub struct Channel {
     pub kind: ChannelKind,
     pub private_roles: Option<BTreeSet<Id>>,
     pub order: (u64, Id),
+    pub ttl_ms: Option<u32>,
 }
 
 #[derive(Clone, Debug)]
@@ -241,6 +242,7 @@ impl State {
                         kind: *kind,
                         private_roles: pr,
                         order: (e.op.clock, e.id),
+                        ttl_ms: None,
                     },
                 );
             }
@@ -257,6 +259,13 @@ impl State {
                     .ok_or_else(|| anyhow::anyhow!("kanal yok"))?;
                 c.name = name.clone();
                 c.private_roles = pr;
+            }
+            OpBody::SetChannelTtl { channel, ttl_ms } => {
+                self.need(a, Perms::MANAGE_CHANNELS)?;
+                self.channels
+                    .get_mut(channel)
+                    .ok_or_else(|| anyhow::anyhow!("kanal yok"))?
+                    .ttl_ms = *ttl_ms;
             }
             OpBody::DeleteChannel { channel } => {
                 self.need(a, Perms::MANAGE_CHANNELS)?;

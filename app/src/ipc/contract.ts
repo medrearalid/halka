@@ -37,6 +37,8 @@ export interface ChannelView {
   /** Member ids currently screen-sharing in this voice channel. */
   streams: Id[];
   unread: number;
+  /** Default message lifetime (ms); senders may only shorten it. */
+  ttl_ms: number | null;
 }
 
 export interface RoleView {
@@ -86,6 +88,9 @@ export interface SpaceView {
   owner: Id;
   /** Members connect only through relays; inactive on this device until relay-only is active. */
   relay_required: boolean;
+  /** Trust tier limits (bytes): largest attachment; largest image that loads without a click. */
+  max_file: number;
+  auto_image: number;
   /** Effective space-level permissions of the local user. */
   my_perms: Perm[];
   channels: ChannelView[];
@@ -105,7 +110,19 @@ export interface MessageView {
   text: string;
   reply_to: Id | null;
   edited: boolean;
-  deleted: boolean;
+  /** unix ms when the message vanishes everywhere */
+  expires: number | null;
+  files: FileRef[];
+}
+
+export interface FileRef {
+  /** blake3 of the plain bytes */
+  hash: Id;
+  size: number;
+  name: string;
+  mime: string;
+  /** [width, height] when the sender attached a WebP image */
+  image: [number, number] | null;
 }
 
 export interface AudioDevices {
@@ -207,9 +224,24 @@ export interface Commands {
     ret: MessageView[];
   };
   send_message: {
-    args: { space: Id; channel: Id; text: string; replyTo: Id | null };
+    args: { space: Id; channel: Id; text: string; replyTo: Id | null; ttlMs?: number | null; files?: Id[] };
     ret: Id;
   };
+  set_channel_ttl: { args: { space: Id; channel: Id; ttlMs: number | null }; ret: void };
+  /** Attachments: begin → raw chunks (u32 LE handle ++ bytes) → end. */
+  attach_begin: { args: { space: Id; name: string; size: number }; ret: number };
+  attach_chunk: { args: ArrayBuffer; ret: void };
+  attach_end: { args: { handle: number }; ret: FileRef };
+  attach_cancel: { args: { handle: number }; ret: void };
+  /** A finished attachment removed before sending. */
+  attach_discard: { args: { hash: Id }; ret: void };
+  /** Raw bytes of a downloaded, validated inline WebP. */
+  file_bytes: { args: { space: Id; msg: Id; hash: Id }; ret: ArrayBuffer };
+  file_ready: { args: { hash: Id }; ret: boolean };
+  fetch_file: { args: { space: Id; msg: Id; hash: Id }; ret: void };
+  /** Saves into Downloads (marked as from the internet); returns the path. */
+  save_file: { args: { space: Id; msg: Id; hash: Id }; ret: string };
+  reveal_file: { args: { path: string }; ret: void };
   edit_message: { args: { space: Id; message: Id; text: string }; ret: void };
   delete_message: { args: { space: Id; message: Id }; ret: void };
 
@@ -268,8 +300,12 @@ export type UpdateStatus =
 export interface Events {
   /** Full state; emitted on any change (debounced). */
   snapshot: Snapshot;
-  /** New, edited or deleted message (deleted => text ""). */
+  /** New or edited message. */
   message: MessageView;
+  /** Messages purged everywhere (deleted or expired). */
+  removed: { space: Id; channel: Id; id: Id }[];
+  /** Download progress; have === size means ready, size 0 means failed. */
+  file_progress: { hash: Id; have: number; size: number };
   /** Voice levels 0..1 by member id (incl. self), ~20 Hz while in a voice channel. */
   levels: Record<Id, number>;
   /** Transient notice for the user. */

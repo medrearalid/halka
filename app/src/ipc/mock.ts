@@ -91,6 +91,7 @@ export function createMockBackend(): Backend {
     voice: [],
     streams: [],
     unread: 0,
+    ttl_ms: null,
     ...extra,
   });
 
@@ -204,10 +205,10 @@ export function createMockBackend(): Backend {
         text: lines[(i * 7 + n) % lines.length],
         reply_to: prev && Math.random() < 0.08 ? prev.id : null,
         edited: Math.random() < 0.05,
-        deleted: false,
+        expires: null,
+        files: [],
       });
     }
-    if (out.length > 10) Object.assign(out[out.length - 8], { deleted: true, text: "" });
     messages.set(c.id, out);
   };
   for (const sp of spaces)
@@ -237,6 +238,8 @@ export function createMockBackend(): Backend {
     spaces: spaces.map((sp) => ({
       ...structuredClone(sp),
       relay_required: !!sp.relay_required,
+      max_file: (sp.relay_required ? 50 : 500) * 1024 * 1024,
+      auto_image: (sp.relay_required ? 8 : 25) * 1024 * 1024,
       my_perms: permsOf(sp),
       channels: structuredClone(sp.channels),
     })),
@@ -253,6 +256,16 @@ export function createMockBackend(): Backend {
   const need = (s: MSpace, p: Perm) => {
     const perms = permsOf(s);
     if (!perms.includes(p) && !perms.includes("admin")) throw "Bunun için yetkin yok";
+  };
+  // attachments live in memory only (bytes by hash), like the real core's sealed blobs
+  const blobs = new Map<Id, Uint8Array>();
+  const staged = new Map<Id, MessageView["files"][number]>();
+  const uploads = new Map<number, { name: string; parts: Uint8Array[] }>();
+  let nextUpload = 0;
+  const purge = (m: MessageView) => {
+    const list = messages.get(m.channel) ?? [];
+    messages.set(m.channel, list.filter((x) => x.id !== m.id));
+    emit("removed", [{ space: m.space, channel: m.channel, id: m.id }]);
   };
   const findMsg = (id: Id) => {
     for (const list of messages.values()) {
@@ -381,7 +394,7 @@ export function createMockBackend(): Backend {
       const c = Math.random() < 0.6 ? s.channels[0] : s.channels[1];
       const others = s.members.filter((m) => m.id !== me.id && m.online);
       const author = others[Math.floor(Math.random() * others.length)];
-      const m: MessageView = { id: newId(), space: s.id, channel: c.id, author: author.id, ts: Date.now(), text: lines[Math.floor(Math.random() * lines.length)], reply_to: null, edited: false, deleted: false };
+      const m: MessageView = { id: newId(), space: s.id, channel: c.id, author: author.id, ts: Date.now(), text: lines[Math.floor(Math.random() * lines.length)], reply_to: null, edited: false, expires: null, files: [] };
       messages.get(c.id)!.push(m);
       c.unread++;
       emit("message", m);
@@ -580,13 +593,23 @@ export function createMockBackend(): Backend {
       }
       return structuredClone(older.slice(-limit));
     },
-    send_message: ({ space, channel, text, replyTo }) => {
+    send_message: ({ space, channel, text, replyTo, ttlMs, files }) => {
       const s = sp(space);
       need(s, "send");
-      if (!s.channels.some((c) => c.id === channel)) throw "Kanal bulunamadı";
-      const t = String(text);
-      if (!t.trim() || t.length > 4000) throw "Mesaj boş ya da çok uzun";
-      const m: MessageView = { id: newId(), space: s.id, channel, author: me.id, ts: Date.now(), text: t, reply_to: replyTo, edited: false, deleted: false };
+      const c = s.channels.find((x) => x.id === channel);
+      if (!c) throw "Kanal bulunamadı";
+      const t = String(text).trim();
+      const refs = (files ?? []).map((h: Id) => {
+        const r = staged.get(h);
+        if (!r) throw "Ek bulunamadı";
+        staged.delete(h);
+        return r;
+      });
+      if ((!t && refs.length === 0) || t.length > 4000) throw "Mesaj boş ya da çok uzun";
+      const ttl = ttlMs != null && c.ttl_ms != null ? Math.min(ttlMs, c.ttl_ms) : (ttlMs ?? c.ttl_ms);
+      const ts = Date.now();
+      const m: MessageView = { id: newId(), space: s.id, channel, author: me.id, ts, text: t, reply_to: replyTo, edited: false, expires: ttl ? ts + ttl : null, files: refs };
+      if (ttl) setTimeout(() => purge(m), ttl);
       const list = messages.get(channel) ?? [];
       list.push(m);
       messages.set(channel, list);
@@ -602,9 +625,66 @@ export function createMockBackend(): Backend {
     delete_message: ({ space, message }) => {
       const m = findMsg(message);
       if (m.author !== me.id) need(sp(space), "manage_messages");
-      Object.assign(m, { text: "", deleted: true });
-      emit("message", { ...m });
+      purge(m);
     },
+    set_channel_ttl: ({ space, channel, ttlMs }) => {
+      const s = sp(space);
+      need(s, "manage_channels");
+      const c = s.channels.find((x) => x.id === channel);
+      if (!c) throw "Kanal bulunamadı";
+      c.ttl_ms = ttlMs;
+      changed();
+    },
+    attach_begin: ({ space, name, size }) => {
+      const s = sp(space);
+      const max = (s.relay_required ? 50 : 500) * 1024 * 1024;
+      if (size > max) throw `Bu halkada dosyalar en fazla ${max >> 20} MB olabilir`;
+      uploads.set(++nextUpload, { name, parts: [] });
+      return nextUpload;
+    },
+    attach_chunk: (body: ArrayBuffer) => {
+      const handle = new DataView(body).getUint32(0, true);
+      const u = uploads.get(handle);
+      if (!u) throw "Yükleme yok";
+      u.parts.push(new Uint8Array(body.slice(4)));
+    },
+    attach_end: async ({ handle }) => {
+      const u = uploads.get(handle);
+      if (!u) throw "Yükleme yok";
+      uploads.delete(handle);
+      const bytes = new Uint8Array(await new Blob(u.parts as BlobPart[]).arrayBuffer());
+      const hash = hexId(`f-${u.name}-${bytes.length}-${Math.random()}`);
+      blobs.set(hash, bytes);
+      const webp = /\.webp$/i.test(u.name);
+      let image: [number, number] | null = null;
+      if (webp) {
+        const bmp = await createImageBitmap(new Blob([bytes], { type: "image/webp" })).catch(() => null);
+        if (bmp) image = [bmp.width, bmp.height];
+      }
+      const ref = { hash, size: bytes.length, name: u.name, mime: webp ? "image/webp" : "application/octet-stream", image };
+      staged.set(hash, ref);
+      return ref;
+    },
+    attach_cancel: ({ handle }) => void uploads.delete(handle),
+    attach_discard: ({ hash }) => {
+      if (staged.delete(hash)) blobs.delete(hash);
+    },
+    file_ready: ({ hash }) => blobs.has(hash),
+    fetch_file: ({ hash }) => {
+      const b = blobs.get(hash);
+      setTimeout(() => emit("file_progress", { hash, have: b?.length ?? 0, size: b?.length ?? 0 }), 300);
+    },
+    file_bytes: ({ hash }) => {
+      const b = blobs.get(hash);
+      if (!b) throw "Dosya henüz inmedi";
+      return b.slice().buffer;
+    },
+    save_file: ({ hash }) => {
+      const b = blobs.get(hash);
+      if (!b) throw "Dosya henüz inmedi";
+      return "C:\\Users\\demo\\Downloads\\dosya";
+    },
+    reveal_file: () => {},
     voice_join: async ({ space, channel }) => {
       await delay(250);
       const s = sp(space);

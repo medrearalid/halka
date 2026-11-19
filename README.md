@@ -32,6 +32,7 @@ cargo test --workspace        # durum makinesi, protokol, ses hattı, uçtan uca
 cd app && bun test tests       # akış paket formatı, koltuk/pan hesabı
 cargo build --profile fastrel -p halka --features tauri/custom-protocol
 bash tools/e2e/run.sh          # iki gerçek örnek: isim, halka, davet, katılma, sohbet, XSS, ses odası, ekran paylaşımı
+node tools/e2e/files.mjs <klasör>  # iki gerçek örnek: ekran görüntüsü yapıştırma, dosya kaydetme (Mark of the Web), silme, süreli mesaj, diskte iz taraması
 ```
 
 ## Sürüm yayınlama ve güncelleme
@@ -101,6 +102,8 @@ noktasından geriye tarihli işlem üretip geri sızmasını engeller. Bunun tes
 | Taşkın / DoS | Her çerçeve, ayırma yapılmadan önce boyut sınırından geçer. Eş başına çerçeve, bayt, işlem ve datagram hız sınırları vardır. Bekleyen işlem havuzu sınırlıdır. İzleyici sayısı ve anahtar kare isteği sıklığı kısıtlanır. |
 | XSS | Arayüz mesajları yalnızca düz metin olarak gösterir. Sıkı bir CSP uygulanır (`default-src 'self'`, uzak içerik yok). Tauri yetkileri en düşük seviyededir ve prototipler dondurulur. |
 | Disk | Kimlik anahtarı Windows DPAPI ile kullanıcı hesabına mühürlenir. Halkadan ayrılınca ya da atılınca o halkanın bütün mesaj ve indeksleri silinir. |
+| Silinen ve süreli mesajlar | Her mesaj ve dosya diskte kendi anahtarıyla AES-256-GCM ile şifrelenir; anahtarlar `keys.bin` içinde sabit yuvalardadır ve ana anahtar DPAPI ile mühürlüdür. Silmede ya da süre dolunca yuva yerinde sıfırlanır, böylece veritabanının boşalan sayfalarında kalan şifreli metin bir daha çözülemez. Silme her eşte uygulanır; silinmiş bir mesaj eşler tarafından yeniden sunulsa da kabul edilmez. Henüz görülmemiş bir mesaja gelen silme, silme yetkisi doğrulanana kadar bekletilir. Relay şart halkada süreli mesajların anahtarı yalnızca bellekte tutulur. |
+| Dosyalar | Dosya, onu içeren canlı bir mesajı görebilen eşe gönderilir. Boyut imzalı mesajdaki değerle sınırlıdır ve blake3 ile doğrulanır. Sınır relay'siz halkada 500 MB, relay şart halkada 50 MB'tır. Yalnızca bellek güvenli bir çözücüden geçen WebP satır içinde gösterilir; gönderen görseli WebP'ye çevirirken EXIF ve konum bilgisi de silinir. Kaydedilen dosyaya "internetten geldi" işareti (Mark of the Web) eklenir, böylece Windows SmartScreen çalıştırmadan önce denetler. Çalıştırılabilir dosyalar kaydedilmeden önce uyarı verir. |
 | IP adresinin görünmesi | Doğrudan bağlantı karşı tarafa IP adresini gösterir. "IP adresimi gizle" seçeneği yalnızca relay üzerinden bağlanır. |
 
 **Dürüst sınırlar**
@@ -117,6 +120,13 @@ noktasından geriye tarihli işlem üretip geri sızmasını engeller. Bunun tes
 - **Ölçek.** Ses tam ağ (mesh) topolojisinde akar. 8–10 kişiye kadar rahattır; daha
   kalabalık odalar için seçici yönlendirme (SFU benzeri) gerekir.
 - **Platform.** Global bas-konuş ve DPAPI yalnızca Windows'ta vardır.
+- **Silmenin sınırları.**
+  - Karşı tarafın değiştirilmiş bir istemci kullanmasını ya da indirip kaydettiği dosyaları engelleyemeyiz.
+  - SSD'ler sektörleri yeniden eşleyebilir ve Windows gölge kopyaları eski veriyi tutabilir. Bu yüzden sıfırlanan bir anahtarın eski kopyası diskin fiziksel katmanında bir süre kalabilir.
+  - Bellekteki anahtarlar sayfa dosyasına ya da hazırda bekletme dosyasına düşebilir.
+  - Uygulama kapalıyken süresi dolan bir mesaj, uygulama yeniden açılana kadar o cihazda şifreli ve anahtarıyla birlikte durur. Açılışta ilk iş olarak silinir. Relay şart halkalarda bu sorun yoktur, çünkü anahtar zaten yalnızca bellekte tutulur.
+  - Silinen mesajların kimliği, zaman damgası ve dosya hash'i yakınsama için saklanır. İçerik saklanmaz.
+  - Bu sürümden önce yazılmış düz metin geçmiş ilk açılışta şifrelenir. Eski düz metin, veritabanının boş sayfaları üzerine yazılana kadar diskte kalabilir.
 
 ## Doğrulama durumu
 

@@ -1,4 +1,5 @@
 pub mod api;
+mod files;
 pub mod id;
 pub mod identity;
 pub mod invite;
@@ -10,6 +11,7 @@ pub mod perm;
 mod profile;
 pub mod space;
 pub mod store;
+pub mod vault;
 pub mod voice;
 pub mod wire;
 pub use node::Node;

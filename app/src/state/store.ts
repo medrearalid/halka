@@ -32,6 +32,8 @@ interface AppState extends Persisted {
   bootError: string | null;
   channel: Id | null;
   msgs: Record<Id, ChannelMsgs>;
+  /** Download progress by file hash (have === size: ready; size 0: failed). */
+  fileProgress: Record<Id, { have: number; size: number }>;
   toasts: Toast[];
   localStream: MediaStream | null;
   nativeShare: boolean;
@@ -83,6 +85,7 @@ export const useApp = create<AppState>()((set, get) => ({
   bootError: null,
   channel: null,
   msgs: {},
+  fileProgress: {},
   toasts: [],
   localStream: null,
   nativeShare: false,
@@ -236,6 +239,18 @@ export async function boot() {
     }
     if (m.channel === visibleChat(s)?.id && document.hasFocus()) markReadSoon(m.space, m.channel);
   });
+  on("removed", (gone) => {
+    const s = useApp.getState();
+    const msgs = { ...s.msgs };
+    for (const g of gone) {
+      const cur = msgs[g.channel];
+      if (cur) msgs[g.channel] = { ...cur, items: cur.items.filter((m) => m.id !== g.id) };
+    }
+    useApp.setState({ msgs });
+  });
+  on("file_progress", (p) =>
+    useApp.setState((s) => ({ fileProgress: { ...s.fileProgress, [p.hash]: { have: p.have, size: p.size } } })),
+  );
   on("notice", (n) => useApp.getState().toast(n.kind, n.text));
   window.addEventListener("focus", () => {
     const s = useApp.getState();

@@ -248,8 +248,93 @@ fn send_message(
     channel: Id,
     text: String,
     reply_to: Option<Id>,
+    ttl_ms: Option<u32>,
+    files: Option<Vec<Id>>,
 ) -> R<Id> {
-    n.send_message(space, channel, &text, reply_to).map_err(e)
+    n.send_post(space, channel, &text, reply_to, ttl_ms, &files.unwrap_or_default())
+        .map_err(e)
+}
+
+#[tauri::command(async)]
+fn set_channel_ttl(n: State<Node>, space: Id, channel: Id, ttl_ms: Option<u32>) -> R<()> {
+    n.op(space, OpBody::SetChannelTtl { channel, ttl_ms })
+        .map(|_| ())
+        .map_err(e)
+}
+
+#[tauri::command(async)]
+fn attach_begin(n: State<Node>, space: Id, name: String, size: u64) -> R<u32> {
+    n.attach_begin(space, &name, size).map_err(e)
+}
+
+/// Raw binary body: u32 LE upload handle, then the next piece of the attachment.
+#[tauri::command(async)]
+fn attach_chunk(n: State<Node>, request: Request<'_>) -> R<()> {
+    match request.body() {
+        InvokeBody::Raw(b) if b.len() >= 4 => {
+            let handle = u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
+            n.attach_chunk(handle, &b[4..]).map_err(e)
+        }
+        _ => Err("attach_chunk expects a raw ArrayBuffer body".into()),
+    }
+}
+
+#[tauri::command(async)]
+fn attach_end(n: State<Node>, handle: u32) -> R<halka_core::msg::FileRef> {
+    n.attach_end(handle).map_err(e)
+}
+
+#[tauri::command(async)]
+fn attach_cancel(n: State<Node>, handle: u32) {
+    n.attach_cancel(handle)
+}
+
+#[tauri::command(async)]
+fn attach_discard(n: State<Node>, hash: Id) -> R<()> {
+    n.attach_discard(hash).map_err(e)
+}
+
+/// Raw bytes of a validated inline image, for a Blob URL (never the asset protocol: no disk cache).
+#[tauri::command(async)]
+fn file_bytes(n: State<Node>, space: Id, msg: Id, hash: Id) -> R<tauri::ipc::Response> {
+    n.file_bytes(space, msg, hash)
+        .map(tauri::ipc::Response::new)
+        .map_err(e)
+}
+
+#[tauri::command(async)]
+fn file_ready(n: State<Node>, hash: Id) -> bool {
+    n.file_ready(hash)
+}
+
+#[tauri::command(async)]
+fn fetch_file(n: State<Node>, space: Id, msg: Id, hash: Id) -> R<()> {
+    n.fetch_file(space, msg, hash).map_err(e)
+}
+
+/// Saves into Downloads (Mark of the Web set) and returns the path.
+#[tauri::command(async)]
+fn save_file(app: AppHandle, n: State<Node>, space: Id, msg: Id, hash: Id) -> R<String> {
+    let dir = app.path().download_dir().map_err(|x| x.to_string())?;
+    n.save_file(space, msg, hash, &dir)
+        .map(|p| p.to_string_lossy().into_owned())
+        .map_err(e)
+}
+
+/// Show a saved file in Explorer. Only files in Downloads, the one place `save_file` writes.
+#[tauri::command(async)]
+fn reveal_file(app: AppHandle, path: String) -> R<()> {
+    let dir = app.path().download_dir().map_err(|x| x.to_string())?;
+    let p = std::path::Path::new(&path);
+    if p.parent() != Some(dir.as_path()) || !p.is_file() {
+        return Err("bu dosya gösterilemez".into());
+    }
+    #[cfg(windows)]
+    std::process::Command::new("explorer")
+        .arg(format!("/select,{}", p.display()))
+        .spawn()
+        .map_err(|x| x.to_string())?;
+    Ok(())
 }
 
 #[tauri::command(async)]
@@ -402,6 +487,15 @@ async fn pump(app: AppHandle, node: Node, mut rx: tokio::sync::mpsc::UnboundedRe
                 Ok(())
             }
             Event::Message(m) => app.emit("message", m),
+            Event::Removed(gone) => app.emit(
+                "removed",
+                gone.into_iter()
+                    .map(|(space, channel, id)| json!({ "space": space, "channel": channel, "id": id }))
+                    .collect::<Vec<_>>(),
+            ),
+            Event::FileProgress { hash, have, size } => {
+                app.emit("file_progress", json!({ "hash": hash, "have": have, "size": size }))
+            }
             Event::Levels(l) => {
                 let map: serde_json::Map<String, serde_json::Value> =
                     l.into_iter().map(|(id, v)| (id.hex(), json!(v))).collect();
@@ -523,6 +617,8 @@ pub fn run() {
                 .background_color(tauri::window::Color(13, 15, 18, 255))
                 .data_directory(dir.join("webview"))
                 .additional_browser_args(BROWSER_ARGS)
+                // HTML5 drops hand the chat File objects (bytes), never local paths
+                .disable_drag_drop_handler()
                 .build()?;
             let menu = tauri::menu::Menu::with_items(
                 app,
@@ -659,6 +755,17 @@ pub fn run() {
             ban,
             messages,
             send_message,
+            set_channel_ttl,
+            attach_begin,
+            attach_chunk,
+            attach_end,
+            attach_cancel,
+            attach_discard,
+            file_bytes,
+            file_ready,
+            fetch_file,
+            save_file,
+            reveal_file,
             edit_message,
             delete_message,
             voice_join,

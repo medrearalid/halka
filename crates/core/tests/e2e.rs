@@ -202,10 +202,10 @@ async fn space_lifecycle() {
     assert!(b.delete_message(s, id).is_err());
     a.delete_message(s, id).unwrap();
     until("delete arrives", || {
-        b.messages(s, ch, None, 50)
+        !b.messages(s, ch, None, 50)
             .unwrap()
             .iter()
-            .any(|m| m.id == id && m.deleted)
+            .any(|m| m.id == id)
     })
     .await;
 
@@ -551,4 +551,62 @@ async fn revoked_stream_permission_stops_the_stream_at_the_watcher() {
     assert_eq!(got.lock().len(), 1, "no GOP may arrive after the permission is gone");
     a.shutdown().await;
     b.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn timed_messages_files_and_deletes_converge() {
+    let dir = tempfile::tempdir().unwrap();
+    let (a, b) = (node(&dir, "ayse").await, node(&dir, "berk").await);
+    let s = a.create_space("Dosya", false).unwrap();
+    let ch = text_channel(&a, s);
+    b.join_space(&a.create_invite(s, None, None).unwrap()).await.unwrap();
+
+    // a 200 KB file crosses in chunks and is verified by hash
+    let data: Vec<u8> = (0..200_000u32).map(|i| (i * 7 % 251) as u8).collect();
+    let up = a.attach_begin(s, "rapor.bin", data.len() as u64).unwrap();
+    for c in data.chunks(70_000) {
+        a.attach_chunk(up, c).unwrap();
+    }
+    let f = a.attach_end(up).unwrap();
+    assert_eq!(f.hash, Id(*blake3::hash(&data).as_bytes()));
+    let fm = a.send_post(s, ch, "ek", None, None, &[f.hash]).unwrap();
+    // a timed message disappears on both sides
+    let tm = a.send_post(s, ch, "beş saniye", None, Some(5_000), &[]).unwrap();
+    until("b gets both", || {
+        let m = b.messages(s, ch, None, 50).unwrap();
+        m.iter().any(|m| m.id == fm && m.files.len() == 1) && m.iter().any(|m| m.id == tm && m.expires.is_some())
+    })
+    .await;
+    b.fetch_file(s, fm, f.hash).unwrap();
+    until("b downloads the file", || b.file_ready(f.hash)).await;
+    let saved = b.save_file(s, fm, f.hash, dir.path()).unwrap();
+    assert_eq!(std::fs::read(&saved).unwrap(), data);
+    assert_eq!(saved.file_name().unwrap(), "rapor.bin");
+    until("timed message gone everywhere", || {
+        [&a, &b].iter().all(|n| !n.messages(s, ch, None, 50).unwrap().iter().any(|m| m.id == tm))
+    })
+    .await;
+
+    // deleting the file message removes the file on the receiver too
+    a.delete_message(s, fm).unwrap();
+    until("delete purges b's copy", || !b.file_ready(f.hash)).await;
+    assert!(b.fetch_file(s, fm, f.hash).is_err());
+
+    // a channel timer caps every new message
+    a.op(s, OpBody::SetChannelTtl { channel: ch, ttl_ms: Some(60_000) }).unwrap();
+    until("b sees channel timer", || {
+        b.snapshot().spaces[0].channels.iter().any(|c| c.id == ch && c.ttl_ms == Some(60_000))
+    })
+    .await;
+    let capped = b.send_message(s, ch, "kalıcı olamaz", None).unwrap();
+    until("a gets capped message", || {
+        a.messages(s, ch, None, 50).unwrap().iter().any(|m| {
+            m.id == capped && m.expires.is_some_and(|e| e - m.ts == 60_000)
+        })
+    })
+    .await;
+
+    for n in [a, b] {
+        n.shutdown().await;
+    }
 }

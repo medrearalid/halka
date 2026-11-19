@@ -1041,6 +1041,10 @@ pub(crate) fn ingest_msg(
     s: SignedMsg,
     live: bool,
 ) -> Result<()> {
+    // deleted content keeps being offered by peers that missed the delete (or haven't updated)
+    if i.store.is_deleted(&s.id())? {
+        return Ok(());
+    }
     let m = s.verify()?;
     let log = st.spaces.get(&m.space).context("unknown space")?;
     let state = &log.state;
@@ -1056,28 +1060,54 @@ pub(crate) fn ingest_msg(
             "sender can't see this channel"
         );
     }
+    // a channel timer binds what is said now; reconciled history from before it stays valid
+    if live
+        && matches!(m.body, MsgBody::Text { .. } | MsgBody::Post { .. })
+        && let Some(cap) = state.channels.get(&m.channel).and_then(|c| c.ttl_ms)
+    {
+        ensure!(
+            m.expires()
+                .is_some_and(|e| e - m.ts <= cap as u64),
+            "bu kanalda mesajlar en fazla kanal süresi kadar kalabilir"
+        );
+    }
+    let ram = m.expires().is_some() && state.relay_required;
+    let mut hold = None;
     match &m.body {
-        MsgBody::Text { .. } => {}
-        MsgBody::Edit { target, .. } | MsgBody::Delete { target } => {
+        MsgBody::Text { .. } | MsgBody::Post { .. } => {}
+        MsgBody::Edit { target, .. } => {
             let t = i.store.msg_view(target)?.context("unknown target")?;
             ensure!(t.msg.channel == m.channel, "target in another channel");
-            match m.body {
-                MsgBody::Edit { .. } => {
-                    ensure!(t.msg.author == m.author, "only the author may edit")
-                }
-                _ => ensure!(
+            ensure!(t.msg.author == m.author, "only the author may edit");
+        }
+        MsgBody::Delete { target } => match i.store.msg_view(target)? {
+            Some(t) => {
+                ensure!(t.msg.channel == m.channel, "target in another channel");
+                ensure!(
                     msg::can_delete(state, &m.author, &t.msg.author, &m.channel),
                     "not allowed to delete"
-                ),
+                );
             }
-        }
+            None if i.store.is_deleted(target)? => {}
+            None => hold = Some(*target),
+        },
     }
-    if !i.store.put_msg(&s, &m)? {
+    if hold.is_some() {
+        // can't check the right to delete yet: keep (and sync) it, but apply it only once the
+        // target shows up, so an unverified delete can never pre-empt (censor) a message
+        i.store.hold_delete(&s, &m)?;
         return Ok(());
     }
+    let Some(gone) = i.store.put_msg(&s, &m, ram)? else {
+        return Ok(());
+    };
+    if m.expires().is_some() {
+        i.expiry_wake.notify_one();
+    }
+    let state = &st.spaces.get(&m.space).context("unknown space")?.state;
     let channel = m.channel;
     let target = match &m.body {
-        MsgBody::Text { .. } => s.id(),
+        MsgBody::Text { .. } | MsgBody::Post { .. } => s.id(),
         MsgBody::Edit { target, .. } | MsgBody::Delete { target } => *target,
     };
     // fan out to members who can read the channel
@@ -1106,11 +1136,23 @@ pub(crate) fn ingest_msg(
             );
         }
     }
-    if let Some(v) = i.store.msg_view(&target)? {
+    if !gone.is_empty() {
+        i.emit(Event::Removed(gone));
+    } else if let Some(v) = i.store.msg_view(&target)? {
         i.emit(Event::Message(msg_view(v)));
     }
     if from.is_some() {
         i.emit(Event::Changed); // unread counts
+    }
+    if matches!(m.body, MsgBody::Text { .. } | MsgBody::Post { .. }) {
+        for (d, dm) in i.store.held_for(&target)? {
+            let allowed = dm.channel == m.channel
+                && msg::can_delete(state, &dm.author, &m.author, &m.channel);
+            let gone = i.store.resolve_held(&target, &d, &dm, allowed)?;
+            if !gone.is_empty() {
+                i.emit(Event::Removed(gone));
+            }
+        }
     }
     Ok(())
 }
@@ -1212,7 +1254,9 @@ async fn uni_loop(i: Arc<Inner>, conn: Connection, remote: Id) {
         VIDEO_BYTES_PER_SEC,
         VIDEO_BURST_BYTES,
     )));
+    let file_rate = Arc::new(parking_lot::Mutex::new(Rate::new(16.0, 64.0)));
     while let Ok(mut r) = conn.accept_uni().await {
+        let file_rate = file_rate.clone();
         let i = i.clone();
         let conn = conn.clone();
         let profile_reads = profile_reads.clone();
@@ -1227,6 +1271,13 @@ async fn uni_loop(i: Arc<Inner>, conn: Connection, remote: Id) {
                         let allowed = profile_rate.lock().allow(1.0);
                         if allowed && let Ok(_permit) = profile_reads.try_acquire() {
                             let _ = crate::profile::receive(&i, &conn, &mut r, remote).await;
+                        }
+                    }
+                    crate::files::TAG => {
+                        if file_rate.lock().allow(1.0)
+                            && let Err(e) = crate::files::receive(&i, &conn, &mut r, remote).await
+                        {
+                            tracing::debug!("file stream from {remote:?}: {e:#}");
                         }
                     }
                     _ => {}
@@ -1360,5 +1411,68 @@ async fn gop_sender(
     }
     if let Some(mut s) = cur {
         let _ = s.finish();
+    }
+}
+
+#[cfg(test)]
+mod held_delete_tests {
+    use super::*;
+    use crate::msg::Msg;
+    use crate::node::Node;
+
+    fn sign(key: &iroh::SecretKey, space: Id, channel: Id, ts: u64, body: MsgBody) -> SignedMsg {
+        let m = Msg { space, channel, author: key.public().into(), ts, body };
+        SignedMsg::sign(key, &m).unwrap()
+    }
+
+    /// A delete that arrives before its target is kept and synced, but applied only if its
+    /// author was allowed to delete: an early delete can't censor someone else's message.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn early_delete_cannot_censor() {
+        let dir = tempfile::tempdir().unwrap();
+        let (a, _ea) = Node::start(&dir.path().join("a")).await.unwrap();
+        let (b, _eb) = Node::start(&dir.path().join("b")).await.unwrap();
+        let space = a.create_space("Sansür", false).unwrap();
+        b.join_space(&a.create_invite(space, None, None).unwrap()).await.unwrap();
+        let ch = a.snapshot().spaces[0]
+            .channels
+            .iter()
+            .find(|c| c.kind == crate::op::ChannelKind::Text)
+            .unwrap()
+            .id;
+        let now = id::now_ms();
+        let ingest = |s: SignedMsg| ingest_msg(&a.0, &mut a.0.st.lock(), Some(b.id()), s, false).unwrap();
+        let items = || -> Vec<Id> {
+            a.0.store.sync_items(&space, &ch, 0, u64::MAX).unwrap().into_iter().map(|(_, i)| i).collect()
+        };
+
+        // b (no moderation rights) deletes a's message before a's node has seen it
+        let t = sign(&a.0.key, space, ch, now, MsgBody::Text { text: "kalmalı".into(), reply_to: None });
+        let bad = sign(&b.0.key, space, ch, now + 1, MsgBody::Delete { target: t.id() });
+        ingest(bad.clone());
+        assert!(items().contains(&bad.id()), "held delete is stored so it converges");
+        ingest(t.clone());
+        assert!(a.0.store.msg_view(&t.id()).unwrap().is_some(), "message was censored");
+        assert!(!items().contains(&bad.id()) && a.0.store.held_for(&t.id()).unwrap().is_empty());
+
+        // the author's own early delete does apply once the target shows up
+        let t2 = sign(&b.0.key, space, ch, now + 2, MsgBody::Text { text: "gidecek".into(), reply_to: None });
+        let ok = sign(&b.0.key, space, ch, now + 3, MsgBody::Delete { target: t2.id() });
+        ingest(ok.clone());
+        ingest(t2.clone());
+        assert!(a.0.store.msg_view(&t2.id()).unwrap().is_none());
+        assert!(items().contains(&ok.id()) && !items().contains(&t2.id()));
+        // and the content is refused if offered again
+        ingest(t2);
+        assert!(!items().contains(&t2_id(&ok)));
+        a.shutdown().await;
+        b.shutdown().await;
+    }
+
+    fn t2_id(d: &SignedMsg) -> Id {
+        match postcard::from_bytes::<Msg>(&d.bytes).unwrap().body {
+            MsgBody::Delete { target } => target,
+            _ => unreachable!(),
+        }
     }
 }

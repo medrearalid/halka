@@ -78,6 +78,16 @@ pub(crate) struct St {
     pub online: bool,
     /// Local mic test outside rooms (settings meter); sends nothing.
     pub mic_test: Option<Voice>,
+    /// Attachments being written from the UI, by handle.
+    pub uploads: HashMap<u32, crate::files::Writer>,
+    pub next_upload: u32,
+    /// Our finished attachments waiting to be sent (hash -> ref).
+    pub staged: HashMap<Id, msg::FileRef>,
+    /// Files being downloaded, and the request per (source, hash).
+    pub fetching: BTreeSet<Id>,
+    pub downloads: HashMap<(Id, Id), crate::files::Download>,
+    /// Upload slots per peer.
+    pub serving: HashMap<Id, Arc<tokio::sync::Semaphore>>,
 }
 
 pub(crate) struct Inner {
@@ -94,6 +104,8 @@ pub(crate) struct Inner {
     pub last_congestion: Mutex<std::time::Instant>,
     /// Commands may run on a non-runtime thread (Tauri sync commands): spawn through this.
     pub rt: tokio::runtime::Handle,
+    /// A message with an earlier deadline than the sweeper is sleeping towards arrived.
+    pub expiry_wake: Arc<tokio::sync::Notify>,
 }
 
 #[derive(Clone)]
@@ -188,6 +200,12 @@ impl Node {
                 watching: HashMap::new(),
                 online: false,
                 mic_test: None,
+                uploads: HashMap::new(),
+                next_upload: 0,
+                staged: HashMap::new(),
+                fetching: BTreeSet::new(),
+                downloads: HashMap::new(),
+                serving: HashMap::new(),
             }),
             voice_targets: RwLock::new(Vec::new()),
             rt: tokio::runtime::Handle::current(),
@@ -195,8 +213,10 @@ impl Node {
             last_keyframe: Mutex::new(
                 std::time::Instant::now() - std::time::Duration::from_secs(5),
             ),
+            expiry_wake: Arc::new(tokio::sync::Notify::new()),
         });
         crate::net::spawn_background(&inner);
+        spawn_expiry(&inner);
         Ok((Node(inner), rx))
     }
 
@@ -471,15 +491,67 @@ impl Node {
         text: &str,
         reply_to: Option<Id>,
     ) -> Result<Id> {
-        msg::check_text(text)?;
-        self.author_msg(
-            space,
-            channel,
+        self.send_post(space, channel, text, reply_to, None, &[])
+    }
+
+    /// `ttl_ms`: the sender's timer; the channel's timer caps it. `files`: staged attachments.
+    pub fn send_post(
+        &self,
+        space: Id,
+        channel: Id,
+        text: &str,
+        reply_to: Option<Id>,
+        ttl_ms: Option<u32>,
+        files: &[Id],
+    ) -> Result<Id> {
+        let i = &self.0;
+        let (ttl, relay, refs) = {
+            let st = i.st.lock();
+            let log = st.spaces.get(&space).context("halka yok")?;
+            let cap = log.state.channels.get(&channel).context("kanal yok")?.ttl_ms;
+            let ttl = match (ttl_ms, cap) {
+                (Some(t), Some(c)) => Some(t.min(c)),
+                (t, c) => t.or(c),
+            };
+            let refs = files
+                .iter()
+                .map(|h| st.staged.get(h).cloned().context("ek bulunamadı"))
+                .collect::<Result<Vec<_>>>()?;
+            (ttl, log.state.relay_required, refs)
+        };
+        msg::check_ttl(ttl)?;
+        let max = crate::files::tier(relay).max_file;
+        ensure!(
+            refs.iter().all(|f| f.size <= max),
+            "bu halkada dosyalar en fazla {} MB olabilir",
+            max >> 20
+        );
+        let text = text.trim();
+        let body = if ttl.is_none() && refs.is_empty() {
+            msg::check_text(text)?;
             MsgBody::Text {
                 text: text.to_string(),
                 reply_to,
-            },
-        )
+            }
+        } else {
+            if ttl.is_some() && relay {
+                for f in &refs {
+                    crate::files::move_to_ram(i, &f.hash)?;
+                }
+            }
+            MsgBody::Post {
+                text: text.to_string(),
+                reply_to,
+                ttl_ms: ttl,
+                files: refs,
+            }
+        };
+        let id = self.author_msg(space, channel, body)?;
+        let mut st = i.st.lock();
+        for h in files {
+            st.staged.remove(h);
+        }
+        Ok(id)
     }
 
     pub fn edit_message(&self, space: Id, message: Id, text: &str) -> Result<()> {
@@ -1038,6 +1110,37 @@ pub(crate) fn drop_space_locked(i: &Inner, st: &mut St, space: Id) {
     crate::net::enforce_access(i, st);
 }
 
+/// Purges messages when their time is up, waking early when a sooner deadline arrives.
+fn spawn_expiry(i: &Arc<Inner>) {
+    let weak = Arc::downgrade(i);
+    tokio::spawn(async move {
+        loop {
+            let Some(i) = weak.upgrade() else { return };
+            let now = id::now_ms();
+            match i.store.expire(now) {
+                Ok(gone) if !gone.is_empty() => {
+                    i.emit(Event::Removed(gone));
+                    i.emit(Event::Changed);
+                }
+                Ok(_) => {}
+                Err(e) => tracing::warn!("expiry sweep failed: {e:#}"),
+            }
+            let wait = i
+                .store
+                .next_expiry()
+                .ok()
+                .flatten()
+                .map_or(60_000, |e| e.saturating_sub(now).clamp(20, 60_000));
+            let wake = i.expiry_wake.clone();
+            drop(i);
+            tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_millis(wait)) => {}
+                _ = wake.notified() => {}
+            }
+        }
+    });
+}
+
 pub(crate) fn msg_view(m: StoredMsg) -> api::MessageView {
     api::MessageView {
         id: m.id,
@@ -1048,7 +1151,8 @@ pub(crate) fn msg_view(m: StoredMsg) -> api::MessageView {
         text: m.text,
         reply_to: m.reply_to,
         edited: m.edited,
-        deleted: m.deleted,
+        expires: m.expires,
+        files: m.files,
     }
 }
 
@@ -1105,6 +1209,7 @@ fn space_view(i: &Inner, st: &St, log: &SpaceLog) -> api::SpaceView {
                 voice,
                 streams,
                 unread: i.store.unread(&s.id, cid, &me).unwrap_or(0),
+                ttl_ms: c.ttl_ms,
             }
         })
         .collect();
@@ -1170,6 +1275,8 @@ fn space_view(i: &Inner, st: &St, log: &SpaceLog) -> api::SpaceView {
         name: s.name.clone(),
         owner: s.owner,
         relay_required: s.relay_required,
+        max_file: crate::files::tier(s.relay_required).max_file,
+        auto_image: crate::files::tier(s.relay_required).auto_image,
         my_perms: s.perms(&me).names(),
         channels,
         roles,

@@ -135,7 +135,7 @@ await step("edit and delete own message via hover tools", async () => {
   await A.hover(row2);
   await A.click(btn("Sil"));
   await A.click(btn("Silinsin mi?"));
-  await B.until("delete reached B", async () => (await B.inv("messages", { space: sid, channel: genel, before: null, limit: 20 })).some((m) => m.deleted));
+  await B.until("delete reached B", async () => !(await B.inv("messages", { space: sid, channel: genel, before: null, limit: 20 })).some((m) => m.text === "dogru yazdim"));
 });
 
 await step("app settings save", async () => {

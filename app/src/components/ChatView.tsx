@@ -1,5 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowDown, Ban, CornerUpLeft, Hash, MessageSquare, Pencil, Send, Trash2, X } from "lucide-react";
+import { ArrowDown, CornerUpLeft, Hash, MessageSquare, Paperclip, Pencil, Send, Trash2, X } from "lucide-react";
 import { call, type ChannelView, type Id, type MessageView, type SpaceView } from "@/ipc";
 import { emptyMsgs, useApp } from "@/state/store";
 import { has, memberOf, nameOf } from "@/lib/space";
@@ -8,6 +8,7 @@ import { copy, fail } from "@/lib/actions";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Avatar, Empty, IconBtn } from "./common";
+import { AttachmentChips, ExpiryChip, MAX_ATTACHMENTS, MessageFiles, TimerMenu, upload, type Att } from "./Attachments";
 
 const MAX_LEN = 4000;
 const GROUP_MS = 5 * 60_000;
@@ -20,6 +21,8 @@ export function ChatView({ space, channel, open = true, dense = false }: { space
   const voice = channel.kind === "voice";
   const [replyTo, setReplyTo] = useState<MessageView | null>(null);
   const [editing, setEditing] = useState<Id | null>(null);
+  const addFiles = useRef<(files: File[]) => void>(() => {});
+  const [dropping, setDropping] = useState(false);
 
   useEffect(() => {
     if (open) void useApp.getState().loadMessages(space.id, channel.id);
@@ -28,13 +31,35 @@ export function ChatView({ space, channel, open = true, dense = false }: { space
   const lastOwn = useMemo(() => {
     for (let i = msgs.items.length - 1; i >= 0; i--) {
       const m = msgs.items[i];
-      if (m.author === meId && !m.deleted) return m.id;
+      if (m.author === meId) return m.id;
     }
     return null;
   }, [msgs.items, meId]);
 
+  const hasFiles = (e: React.DragEvent) => e.dataTransfer.types.includes("Files");
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div
+      className="relative flex min-h-0 flex-1 flex-col"
+      onDragOver={(e) => {
+        if (!hasFiles(e) || !has(space, "send")) return;
+        e.preventDefault();
+        setDropping(true);
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropping(false);
+      }}
+      onDrop={(e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        setDropping(false);
+        if (has(space, "send")) addFiles.current([...e.dataTransfer.files]);
+      }}
+    >
+      {dropping && (
+        <div className="pointer-events-none absolute inset-2 z-20 grid place-items-center rounded-lg border border-dashed border-copper/60 bg-paper-1/85">
+          <span className="text-xs text-ink-2">Eklemek için bırak</span>
+        </div>
+      )}
       {!open ? null : !msgs.loaded ? (
         <TimelineSkeleton />
       ) : msgs.error && msgs.items.length === 0 ? (
@@ -74,6 +99,7 @@ export function ChatView({ space, channel, open = true, dense = false }: { space
         clearReply={() => setReplyTo(null)}
         onEditLast={() => lastOwn && setEditing(lastOwn)}
         dense={dense}
+        addFiles={addFiles}
       />
     </div>
   );
@@ -306,10 +332,10 @@ const MessageRow = memo(function MessageRow({
             {reply ? (
               <>
                 <span className="shrink-0 font-medium text-ink-2">{nameOf(space, reply.author)}</span>
-                <span className="truncate">{reply.deleted ? "silinmiş mesaj" : reply.text}</span>
+                <span className="truncate">{reply.text || reply.files.map((f) => f.name).join(", ")}</span>
               </>
             ) : (
-              <span>daha eski bir mesaja yanıt</span>
+              <span>kaybolmuş ya da daha eski bir mesaja yanıt</span>
             )}
           </button>
         ) : null}
@@ -329,27 +355,32 @@ const MessageRow = memo(function MessageRow({
               </TooltipTrigger>
               <TooltipContent>{full(m.ts)}</TooltipContent>
             </Tooltip>
+            {m.expires !== null && <ExpiryChip at={m.expires} />}
           </div>
         )}
-        {m.deleted ? (
-          <div className="flex items-center gap-1.5 text-[13px] text-ink-3">
-            <Ban className="size-3" /> Bu mesaj silindi
-          </div>
-        ) : editing ? (
+        {editing ? (
           <EditBox m={m} onDone={() => setEditing(null)} />
         ) : (
-          <div className="text-[13px] leading-[1.5] break-words whitespace-pre-wrap text-ink-1" data-selectable>
-            <RichText text={m.text} />
-            {m.edited && <span className="ml-1 text-2xs text-ink-3">(düzenlendi)</span>}
-          </div>
+          (m.text || m.edited || (!head && m.expires !== null)) && (
+            <div className="text-[13px] leading-[1.5] break-words whitespace-pre-wrap text-ink-1" data-selectable>
+              <RichText text={m.text} />
+              {m.edited && <span className="ml-1 text-2xs text-ink-3">(düzenlendi)</span>}
+              {!head && m.expires !== null && (
+                <span className="ml-1.5 align-baseline">
+                  <ExpiryChip at={m.expires} />
+                </span>
+              )}
+            </div>
+          )
         )}
+        <MessageFiles m={m} space={space} dense={dense} />
       </div>
-      {!m.deleted && !editing && (
+      {!editing && (
         <div className="absolute -top-3 right-3 z-10 hidden items-center rounded-md border border-line-2 bg-paper-2 p-0.5 shadow-pop group-hover:flex group-focus-within:flex">
           <ToolBtn label="Yanıtla" onClick={() => onReply(m)}>
             <CornerUpLeft />
           </ToolBtn>
-          {mine && (
+          {mine && m.text && (
             <ToolBtn label="Düzenle" onClick={() => setEditing(m.id)}>
               <Pencil />
             </ToolBtn>
@@ -435,6 +466,7 @@ function Composer({
   clearReply,
   onEditLast,
   dense,
+  addFiles,
 }: {
   space: SpaceView;
   channel: ChannelView;
@@ -442,26 +474,68 @@ function Composer({
   clearReply: () => void;
   onEditLast: () => void;
   dense: boolean;
+  addFiles: React.RefObject<(files: File[]) => void>;
 }) {
   const [text, setText] = useState("");
+  const [atts, setAtts] = useState<Att[]>([]);
+  const [ttl, setTtl] = useState<number | null>(null);
   const ta = useRef<HTMLTextAreaElement>(null);
+  const picker = useRef<HTMLInputElement>(null);
   const canSend = has(space, "send");
   const over = text.length > MAX_LEN;
+  const pending = atts.some((a) => !a.ref && !a.error);
+  const ready = atts.filter((a) => a.ref);
+  const canSubmit = canSend && !over && !pending && (!!text.trim() || ready.length > 0);
 
   useEffect(() => {
     if (replyTo) ta.current?.focus();
   }, [replyTo]);
 
+  // attachments and the timer belong to one channel's draft
+  useEffect(() => {
+    setTtl(null);
+    return () => setAtts((cur) => (cur.forEach((a) => a.cancel()), []));
+  }, [channel.id]);
+
+  const add = (files: File[]) => {
+    const room = MAX_ATTACHMENTS - atts.length;
+    if (files.length > room) useApp.getState().toast("error", `Bir mesaja en fazla ${MAX_ATTACHMENTS} dosya eklenebilir`);
+    const fresh = files.slice(0, Math.max(0, room)).map((f) =>
+      upload(space, f, (a) => setAtts((cur) => cur.map((x) => (x.key === a.key ? a : x)))),
+    );
+    if (fresh.length) setAtts((cur) => [...cur, ...fresh]);
+    ta.current?.focus();
+  };
+  addFiles.current = add;
+
+  const remove = (key: string) =>
+    setAtts((cur) => {
+      cur.find((a) => a.key === key)?.cancel();
+      return cur.filter((a) => a.key !== key);
+    });
+
   const send = () => {
     const t = text.trim();
-    if (!t || over || !canSend) return;
+    if (!canSubmit) return;
     const reply = replyTo?.id ?? null;
+    const sending = atts;
     setText("");
+    setAtts([]);
     clearReply();
-    call("send_message", { space: space.id, channel: channel.id, text: t, replyTo: reply }).catch((e) => {
-      setText(t);
-      fail(e);
-    });
+    call("send_message", {
+      space: space.id,
+      channel: channel.id,
+      text: t,
+      replyTo: reply,
+      ttlMs: ttl,
+      files: sending.filter((a) => a.ref).map((a) => a.ref!.hash),
+    })
+      .then(() => sending.forEach((a) => a.preview && URL.revokeObjectURL(a.preview)))
+      .catch((e) => {
+        setText(t);
+        setAtts(sending);
+        fail(e);
+      });
   };
 
   return (
@@ -479,7 +553,21 @@ function Composer({
             </button>
           </div>
         )}
+        <AttachmentChips atts={atts} onRemove={remove} />
         <div className="flex items-end gap-2 px-2.5 py-2">
+          <input
+            ref={picker}
+            type="file"
+            multiple
+            hidden
+            onChange={(e) => {
+              add([...(e.currentTarget.files ?? [])]);
+              e.currentTarget.value = "";
+            }}
+          />
+          <IconBtn label="Dosya ekle" className="-my-1 -ml-1 size-7 shrink-0 text-ink-3" onClick={() => picker.current?.click()} disabled={!canSend}>
+            <Paperclip />
+          </IconBtn>
           <textarea
             ref={ta}
             value={text}
@@ -487,6 +575,12 @@ function Composer({
             disabled={!canSend}
             placeholder={!canSend ? "Bu kanalda yazma iznin yok" : channel.kind === "voice" ? "Odaya mesaj yaz" : `#${channel.name} kanalına yaz`}
             onChange={(e) => setText(e.target.value)}
+            onPaste={(e) => {
+              const files = [...e.clipboardData.files];
+              if (files.length === 0) return;
+              e.preventDefault();
+              add(files);
+            }}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
@@ -510,8 +604,9 @@ function Composer({
               {text.length}/{MAX_LEN}
             </span>
           )}
+          <TimerMenu value={ttl} cap={channel.ttl_ms} onChange={setTtl} disabled={!canSend} />
           {channel.kind === "voice" && (
-            <IconBtn label="Mesaj gönder" className="-my-1 -mr-1 shrink-0 text-copper" onClick={send} disabled={!canSend || !text.trim() || over}>
+            <IconBtn label="Mesaj gönder" className="-my-1 -mr-1 shrink-0 text-copper" onClick={send} disabled={!canSubmit}>
               <Send />
             </IconBtn>
           )}
