@@ -24,7 +24,8 @@ export function Dialogs() {
       {dialog && (
         <DialogContent
           className={cn(
-            "gap-0 overflow-hidden border-line-2 bg-paper-1 p-0",
+            // minmax(0,1fr): an auto column would grow to fit long unbreakable text (an invite code) and push the dialog wider
+            "grid-cols-[minmax(0,1fr)] gap-0 overflow-hidden border-line-2 bg-paper-1 p-0",
             big
               ? "h-[min(600px,calc(100vh-48px))] w-[min(820px,calc(100vw-32px))] max-w-none sm:max-w-none"
               : kind === "share"
