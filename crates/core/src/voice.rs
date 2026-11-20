@@ -230,7 +230,12 @@ fn apm_config(aec: bool) -> sonora::Config {
 
 fn agc_config() -> sonora::Config {
     sonora::Config {
-        gain_controller2: Some(Default::default()),
+        // GainController2::default() leaves the adaptive stage off (limiter only, 0 dB), so
+        // speech went out at raw mic level and listeners had to boost peers to 200%
+        gain_controller2: Some(sonora::config::GainController2 {
+            adaptive_digital: Some(Default::default()),
+            ..Default::default()
+        }),
         ..Default::default()
     }
 }
@@ -916,5 +921,60 @@ mod tests {
     fn level_scale() {
         assert_eq!(level_of(&[0.0; 10]), 0.0);
         assert!(level_of(&[1.0; 10]) > 0.99);
+    }
+}
+
+#[cfg(test)]
+mod agc_tests {
+    use super::*;
+
+    /// Voiced, pitch-gliding bursts (300 ms on/off) over a faint noise floor. Returns the
+    /// speech-segment level in and out of the AGC stage after ~12 s, in dBFS.
+    fn speech_through_agc(amp: f32) -> (f32, f32) {
+        let mut agc = apm(agc_config());
+        let (mut t, mut seed) = (0f32, 1u32);
+        let (mut ei, mut eo, mut k) = (0f64, 0f64, 0usize);
+        for n in 0..1500 {
+            let talking = (n / 30) % 2 == 0;
+            let mut f = [0f32; FRAME10];
+            for s in f.iter_mut() {
+                seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+                let noise = ((seed >> 8) as f32 / 16_777_216.0 - 0.5) * 0.0006;
+                let f0 = 120.0 + 40.0 * (std::f32::consts::TAU * 1.3 * t).sin();
+                let mut v = 0.0;
+                if talking {
+                    for h in 1..20 {
+                        let fh = f0 * h as f32;
+                        let formant = (-(fh - 700.0).powi(2) / 2.0e5).exp()
+                            + 0.6 * (-(fh - 1200.0).powi(2) / 3.0e5).exp()
+                            + 0.05;
+                        v += (std::f32::consts::TAU * fh * t).sin() * formant;
+                    }
+                }
+                *s = amp * v + noise;
+                t += 1.0 / RATE as f32;
+            }
+            let mut o = [0f32; FRAME10];
+            agc.process_capture_f32(&[&f], &mut [&mut o]).unwrap();
+            if n >= 1200 && talking {
+                ei += f.iter().map(|s| f64::from(s * s)).sum::<f64>();
+                eo += o.iter().map(|s| f64::from(s * s)).sum::<f64>();
+                k += FRAME10;
+            }
+        }
+        let db = |e: f64| (10.0 * (e / k as f64).log10()) as f32;
+        (db(ei), db(eo))
+    }
+
+    #[test]
+    fn quiet_speech_is_brought_up() {
+        let (i, o) = speech_through_agc(0.01);
+        assert!(o > i + 6.0, "quiet mic not boosted: {i:.1} -> {o:.1} dBFS");
+    }
+
+    #[test]
+    fn loud_speech_is_not_pushed_further() {
+        let (i, o) = speech_through_agc(0.1);
+        assert!(o < i + 1.0, "loud mic boosted: {i:.1} -> {o:.1} dBFS");
     }
 }
