@@ -2,6 +2,13 @@
 
 Her sürüm `## <sürüm>` başlığıyla başlar. Maddeler kullanıcıya dönük ve Türkçedir; uygulamadaki "Neler değişti" kartı ve GitHub sürüm sayfası bu dosyadan beslenir.
 
+## 0.1.9
+
+- Sesler artık daha yüksek: kısık mikrofonlar konuşma düzeyine otomatik yükseltiliyor.
+- Pencere paylaşırken o uygulamanın sesi de yayına gidiyor; yalnızca yayını izleyenler duyar. Tam ekran paylaşımı şimdilik sessiz.
+- Odadaki biri katıldığında, ayrıldığında, bağlantısı koptuğunda, mikrofonunu ya da kulaklığını kapatıp açtığında, yayın başlatıp bitirdiğinde bildirim sesi çalıyor.
+- Davet kodu oluşturunca pencere taşmıyor.
+
 ## 0.1.8
 
 - Sohbetteki görsele tıklayınca büyük açılıyor; dışına tıklayarak ya da Esc ile kapanıyor.
