@@ -17,7 +17,7 @@ use ringbuf::HeapRb;
 use ringbuf::traits::{Consumer, Producer, Split};
 
 use crate::id::Id;
-use crate::wire::DG_VOICE;
+use crate::wire::{DG_STREAM_AUDIO, DG_VOICE};
 
 const RATE: u32 = 48_000;
 const FRAME10: usize = 480;
@@ -65,9 +65,23 @@ struct Peer {
     db: f32,
 }
 
+/// Audio of a screen share we watch: stereo, unpanned, its own jitter buffer.
+struct StreamPeer {
+    dec: opus::Decoder,
+    /// interleaved L,R
+    queue: VecDeque<f32>,
+    last_seq: Option<u16>,
+    primed: bool,
+    heard: std::time::Instant,
+}
+
+/// Interleaved stereo samples buffered before stream audio starts playing (60 ms).
+const STREAM_TARGET: usize = FRAME20 * 2 * 3;
+
 #[derive(Default)]
 struct Mixer {
     peers: HashMap<Id, Peer>,
+    streams: HashMap<Id, StreamPeer>,
     volumes: HashMap<Id, f32>,
     pans: HashMap<Id, f32>,
 }
@@ -230,7 +244,15 @@ fn apm_config(aec: bool) -> sonora::Config {
 
 fn agc_config() -> sonora::Config {
     sonora::Config {
-        gain_controller2: Some(Default::default()),
+        // adaptive gain levels quiet mics up to speech loudness; without it AGC2 is only a limiter
+        gain_controller2: Some(sonora::config::GainController2 {
+            // the default 15 dB start clips normal mics for the first second of every join
+            adaptive_digital: Some(sonora::config::AdaptiveDigital {
+                initial_gain_db: 6.0,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
         ..Default::default()
     }
 }
@@ -476,6 +498,82 @@ impl Voice {
     pub fn receive(&self, peer: Id, dg: &[u8]) {
         receive_into(&self.sh, peer, dg)
     }
+
+    /// Incoming screen-share audio from `peer`, whose stream we watch (checked by the node).
+    pub fn receive_stream(&self, peer: Id, dg: &[u8]) {
+        if dg.len() < 4 || dg[0] != DG_STREAM_AUDIO {
+            return;
+        }
+        let seq = u16::from_le_bytes([dg[1], dg[2]]);
+        let mut m = self.sh.mixer.lock();
+        let p = match m.streams.entry(peer) {
+            std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
+            std::collections::hash_map::Entry::Vacant(v) => {
+                let Ok(dec) = opus::Decoder::new(RATE, opus::Channels::Stereo) else {
+                    return;
+                };
+                v.insert(StreamPeer {
+                    dec,
+                    queue: VecDeque::new(),
+                    last_seq: None,
+                    primed: false,
+                    heard: std::time::Instant::now(),
+                })
+            }
+        };
+        let mut pcm = [0f32; FRAME20 * 2 * 3];
+        if let Some(last) = p.last_seq {
+            let gap = seq.wrapping_sub(last) as i16;
+            if gap <= 0 {
+                return;
+            }
+            for _ in 1..gap.min(4) {
+                // conceal short losses
+                if let Ok(n) = p.dec.decode_float(&[], &mut pcm[..FRAME20 * 2], false) {
+                    p.queue.extend(&pcm[..n * 2]);
+                }
+            }
+        }
+        p.last_seq = Some(seq);
+        p.heard = std::time::Instant::now();
+        if let Ok(n) = p.dec.decode_float(&dg[3..], &mut pcm, false) {
+            p.queue.extend(&pcm[..n * 2]);
+        }
+        if p.queue.len() > STREAM_TARGET + SLACK * 2 {
+            let drop = p.queue.len() - STREAM_TARGET;
+            p.queue.drain(..drop & !1);
+        }
+    }
+
+    /// Interleaved samples of `peer`'s stream audio waiting to play (tests).
+    pub fn stream_buffered(&self, peer: Id) -> usize {
+        self.sh.mixer.lock().streams.get(&peer).map_or(0, |s| s.queue.len())
+    }
+}
+
+/// Stereo Opus for screen-share audio: 20 ms of 48 kHz interleaved stereo in, datagram out.
+pub struct StreamAudioEncoder {
+    enc: opus::Encoder,
+    seq: u16,
+    buf: Vec<u8>,
+}
+
+impl StreamAudioEncoder {
+    pub fn new() -> Result<Self> {
+        let mut enc = opus::Encoder::new(RATE, opus::Channels::Stereo, opus::Application::Audio)?;
+        enc.set_bitrate(opus::Bitrate::Bits(128_000))?;
+        // stays under QUIC's ~1200-byte datagram limit; a bigger frame fails to encode and is skipped
+        Ok(Self { enc, seq: 0, buf: vec![0; 1000] })
+    }
+
+    pub fn encode(&mut self, pcm: &[f32]) -> Option<Vec<u8>> {
+        debug_assert_eq!(pcm.len(), FRAME20 * 2);
+        let n = self.enc.encode_float(pcm, &mut self.buf[3..]).ok()?;
+        self.buf[0] = DG_STREAM_AUDIO;
+        self.buf[1..3].copy_from_slice(&self.seq.to_le_bytes());
+        self.seq = self.seq.wrapping_add(1);
+        Some(self.buf[..3 + n].to_vec())
+    }
 }
 
 fn receive_into(sh: &Shared, peer: Id, dg: &[u8]) {
@@ -586,6 +684,25 @@ fn mix(sh: &Shared, frames: usize, out: &mut Vec<f32>, reference: &mut impl Prod
                 p.level * 0.85 + lvl * 0.15
             };
         }
+        // a stream we stopped watching (or that ended) goes quiet; forget it
+        m.streams.retain(|_, s| s.heard.elapsed() < Duration::from_secs(2));
+        for s in m.streams.values_mut() {
+            if !s.primed {
+                s.primed = s.queue.len() >= STREAM_TARGET;
+                if !s.primed {
+                    continue;
+                }
+            }
+            for i in 0..frames {
+                let (Some(l), Some(r)) = (s.queue.pop_front(), s.queue.pop_front()) else {
+                    s.primed = false; // underrun: rebuffer
+                    break;
+                };
+                out[i * 2] += l;
+                out[i * 2 + 1] += r;
+                mono[i] += (l + r) * 0.5;
+            }
+        }
     }
     for s in out.iter_mut() {
         // soft knee limiter: transparent below 0.8, never exceeds 1.0
@@ -614,6 +731,7 @@ fn process(
     let mut agc = apm(agc_config());
     let mut rnn = nnnoiseless::DenoiseState::new();
     let mut vad_max = 0f32;
+    let mut raw_energy = 0f32;
     let mut preroll: VecDeque<Vec<u8>> = VecDeque::new();
     let mut enc = match opus::Encoder::new(RATE, opus::Channels::Mono, opus::Application::Voip) {
         Ok(e) => e,
@@ -660,6 +778,8 @@ fn process(
             1.0
         };
         vad_max = vad_max.max(vad);
+        // gate threshold and meter use the level before AGC, so saved thresholds keep their meaning
+        raw_energy += outp.iter().map(|s| s * s).sum::<f32>();
         let mut gained = [0f32; FRAME10];
         if agc
             .process_capture_f32(&[&outp], &mut [&mut gained])
@@ -671,7 +791,8 @@ fn process(
         if frame20.len() < FRAME20 {
             continue;
         }
-        let level = level_of(&frame20);
+        let level = level_of(&[(raw_energy / FRAME20 as f32).sqrt()]);
+        raw_energy = 0.0;
         sh.self_level.store(level.to_bits(), Relaxed);
         let open = if sh.muted.load(Relaxed) || sh.deafened.load(Relaxed) {
             false

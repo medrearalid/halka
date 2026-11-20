@@ -505,6 +505,54 @@ async fn speech_roundtrip_recording() {
     assert!(rec.len() > 48_000);
 }
 
+/// Screen-share audio reaches watchers' mixers, and only watchers'.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn stream_audio_reaches_only_watchers() {
+    let dir = tempfile::tempdir().unwrap();
+    let (a, b) = (node(&dir, "ayse").await, node(&dir, "berk").await);
+    let s = a.create_space("Ses", false).unwrap();
+    b.join_space(&a.create_invite(s, None, None).unwrap())
+        .await
+        .unwrap();
+    let vc = voice_channel(&a, s);
+    a.voice_join(s, vc).unwrap();
+    b.voice_join(s, vc).unwrap();
+    a.stream_start().unwrap();
+    until("b sees stream", || {
+        b.snapshot().spaces[0]
+            .channels
+            .iter()
+            .any(|c| c.id == vc && c.streams == vec![a.id()])
+    })
+    .await;
+    let mut enc = halka_core::voice::StreamAudioEncoder::new().unwrap();
+    let tone: Vec<f32> = (0..1920)
+        .map(|i| ((i / 2) as f32 * 0.06).sin() * 0.3)
+        .collect();
+    let mut burst = |n: usize| (0..n).for_each(|_| a.stream_audio(enc.encode(&tone).unwrap()));
+    burst(10);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(
+        b.debug_stream_audio(a.id()),
+        0,
+        "not watching: no stream audio"
+    );
+    b.watch(a.id(), std::sync::Arc::new(|_| {})).unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let mut heard = 0;
+    for _ in 0..50 {
+        burst(10);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        heard = heard.max(b.debug_stream_audio(a.id()));
+        if heard > 0 {
+            break;
+        }
+    }
+    assert!(heard > 0, "stream audio did not arrive");
+    a.shutdown().await;
+    b.shutdown().await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn revoked_stream_permission_stops_the_stream_at_the_watcher() {
     let dir = tempfile::tempdir().unwrap();

@@ -74,7 +74,7 @@ export function Dialogs() {
 
 function Small({ title, desc, children }: { title: string; desc?: string; children: ReactNode }) {
   return (
-    <div className="flex flex-col gap-4 p-4">
+    <div className="flex min-w-0 flex-col gap-4 p-4">
       <div className="pr-6">
         <DialogTitle className="text-[14px] font-semibold tracking-tight">{title}</DialogTitle>
         {desc && <DialogDescription className="mt-1 text-xs text-ink-3">{desc}</DialogDescription>}

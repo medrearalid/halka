@@ -175,6 +175,15 @@ pub fn list() -> Result<Vec<Source>> {
     Ok(sources)
 }
 
+/// The app whose audio a window share carries; None for a screen share (no audio).
+pub fn window_pid(target: &Target) -> Option<u32> {
+    match target {
+        Target::Window { pid, .. } => Some(*pid),
+        Target::Listed(id) if id.starts_with("window:") => id.split(':').nth(2)?.parse().ok(),
+        _ => None,
+    }
+}
+
 pub fn resolve(target: &Target) -> Result<(GraphicsCaptureItem, u32, Option<RECT>)> {
     let interop = factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
     match target {

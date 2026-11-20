@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { call, errText, on, type Id, type MessageView, type Snapshot } from "@/ipc";
-import { playStatusSound, statusCue, stopStatusSound } from "@/lib/statusSounds";
+import { peerCue, playStatusSound, statusCue, stopStatusSound } from "@/lib/statusSounds";
 
 export interface ChannelMsgs {
   items: MessageView[];
@@ -219,7 +219,7 @@ function markReadSoon(space: Id, channel: Id) {
 
 function applySnapshot(snap: Snapshot) {
   const previous = useApp.getState();
-  const cue = previous.statusSounds && !previous.welcome ? statusCue(previous.snap, snap) : undefined;
+  const cue = previous.statusSounds && !previous.welcome ? statusCue(previous.snap, snap) ?? peerCue(previous.snap, snap) : undefined;
   const voice = snap.voice;
   const watching = previous.watchFullscreen;
   const stillWatching = watching && voice && snap.spaces.find((space) => space.id === voice.space)

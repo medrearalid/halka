@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cueSamples, statusCue } from "../src/lib/statusSounds";
+import { cueSamples, peerCue, statusCue } from "../src/lib/statusSounds";
 
 const room = { space: "space", channel: "room", muted: false, deafened: false };
 const connected = { online: true, voice: null };
@@ -46,4 +46,25 @@ test("cues are distinct, short, quiet and start and end without clicks", () => {
   const at = (ms: number) => Math.round(ms * rate / 1000);
   expect(cueSamples("muteBoth", rate).subarray(at(86), at(97)).every((sample) => sample === 0)).toBe(true);
   expect(cueSamples("mute", rate).subarray(at(86), at(97)).some((sample) => Math.abs(sample) > 0.008)).toBe(true);
+});
+
+test("other people in my room produce cues; my own changes and other rooms don't", () => {
+  const me = { id: "me", name: "", code: "" };
+  const voice = { space: "space", channel: "room", muted: false, deafened: false };
+  const peer = (channel: string | null, extra = {}) => ({ id: "ayse", online: true, voice: channel ? { channel, muted: false, deafened: false, streaming: false, ...extra } : null });
+  const snap = (v: typeof voice | null, ...members: ReturnType<typeof peer>[]) =>
+    ({ me, voice: v, spaces: [{ id: "space", members: [{ id: "me", online: true, voice: v && { ...v, streaming: false } }, ...members] }] });
+  const alone = snap(voice), withPeer = snap(voice, peer("room"));
+  expect(peerCue(alone, withPeer)).toBe("join");
+  expect(peerCue(withPeer, alone)).toBe("leave");
+  expect(peerCue(withPeer, snap(voice, { ...peer("room"), online: false }))).toBe("leave");
+  expect(peerCue(withPeer, snap(voice, peer("room", { muted: true })))).toBe("mute");
+  expect(peerCue(withPeer, snap(voice, peer("room", { muted: true, deafened: true })))).toBe("muteBoth");
+  expect(peerCue(withPeer, snap(voice, peer("room", { streaming: true })))).toBe("shareStart");
+  expect(peerCue(snap(voice, peer("room", { streaming: true })), withPeer)).toBe("shareEnd");
+  expect(peerCue(alone, snap(voice, peer("other")))).toBeUndefined();
+  expect(peerCue(withPeer, snap(voice, peer("room")))).toBeUndefined();
+  // my own join into an occupied room is not a peer join
+  expect(peerCue(snap(null, peer("room")), withPeer)).toBeUndefined();
+  expect(peerCue(withPeer, snap({ ...voice, muted: true }, peer("room")))).toBeUndefined();
 });

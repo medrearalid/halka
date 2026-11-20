@@ -1218,13 +1218,24 @@ fn voice_changed_quiet(i: &Inner, st: &mut St) {
 }
 
 async fn datagram_loop(i: Arc<Inner>, conn: Connection, remote: Id) {
-    let mut rate = Rate::new(120.0, 240.0);
+    // voice (50/s) plus a watched stream's audio (50/s), with room for bursts
+    let mut rate = Rate::new(240.0, 480.0);
     while let Ok(dg) = conn.read_datagram().await {
-        if !rate.allow(1.0) || dg.first() != Some(&wire::DG_VOICE) {
+        let tag = dg.first().copied();
+        if !rate.allow(1.0) || !matches!(tag, Some(wire::DG_VOICE | wire::DG_STREAM_AUDIO)) {
             continue;
         }
         let st = i.st.lock();
         let Some(v) = &st.voice else { continue };
+        if tag == Some(wire::DG_STREAM_AUDIO) {
+            if st.watching.contains_key(&remote)
+                && may_stream(&st, v.space, remote, v.channel)
+                && let Some(e) = &v.engine
+            {
+                e.receive_stream(remote, &dg);
+            }
+            continue;
+        }
         let in_room = st
             .presence
             .get(&(v.space, remote))

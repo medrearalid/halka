@@ -34,7 +34,7 @@ export function InviteCreator({ compact }: { compact?: boolean }) {
   );
   if (!space) return null;
   return (
-    <div className={compact ? "grid grid-cols-[auto_auto_1fr] items-end gap-3" : "flex flex-col gap-3"}>
+    <div className={compact ? "grid grid-cols-[auto_auto_minmax(0,1fr)] items-end gap-3" : "flex flex-col gap-3"}>
       <Field label="Geçerlilik">
         <Segmented value={expiry} options={EXPIRY} onChange={(v) => (setExpiry(v), setCode(null))} />
       </Field>
@@ -50,7 +50,7 @@ export function InviteCreator({ compact }: { compact?: boolean }) {
       </div>
       {error && <p className="col-span-3 text-xs text-danger">{error}</p>}
       {code && (
-        <div className="enter col-span-3 flex items-center gap-1.5 rounded-md border border-line-2 bg-paper-0 py-1 pr-1 pl-2.5">
+        <div className="enter col-span-3 flex min-w-0 items-center gap-1.5 rounded-md border border-line-2 bg-paper-0 py-1 pr-1 pl-2.5">
           <code className="min-w-0 flex-1 truncate font-mono text-xs text-ink-1" data-selectable>
             {code}
           </code>

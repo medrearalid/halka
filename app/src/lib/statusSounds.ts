@@ -1,4 +1,4 @@
-import type { Snapshot } from "@/ipc/contract";
+import type { MemberView, Snapshot } from "@/ipc/contract";
 
 type Status = Pick<Snapshot, "online" | "voice">;
 type Partial = readonly [ratio: number, strength: number, damping: number];
@@ -45,6 +45,35 @@ export function statusCue(before: Status | null, after: Status): Cue | undefined
     if (prev.muted !== next.muted) return next.muted ? "mute" : "unmute";
   }
   if (after.online !== (before?.online ?? false)) return after.online ? "online" : "offline";
+}
+
+type Room = Pick<Snapshot, "me" | "voice"> & { spaces: { id: string; members: Pick<MemberView, "id" | "online" | "voice">[] }[] };
+
+/** Cue for what other people in my voice room did, so the room is audible without looking. */
+export function peerCue(before: Room | null, after: Room): Cue | undefined {
+  const prev = before?.voice;
+  const next = after.voice;
+  // only while I stay in the same room: my own join/switch already has its cue
+  if (!prev || !next || prev.space !== next.space || prev.channel !== next.channel) return;
+  const inRoom = (snap: Room) => new Map(
+    snap.spaces.find((space) => space.id === next.space)?.members
+      .filter((m) => m.id !== snap.me.id && m.online && m.voice?.channel === next.channel)
+      .map((m) => [m.id, m.voice!]),
+  );
+  const was = inRoom(before), now = inRoom(after);
+  const changes: Cue[] = [];
+  for (const id of was.keys()) if (!now.has(id)) changes.push("leave");
+  for (const [id, v] of now) {
+    const p = was.get(id);
+    if (!p) changes.push("join");
+    else if (p.streaming !== v.streaming) changes.push(v.streaming ? "shareStart" : "shareEnd");
+    else {
+      const cue = statusCue({ online: true, voice: { ...next, ...p } }, { online: true, voice: { ...next, ...v } });
+      if (cue) changes.push(cue);
+    }
+  }
+  // one cue per snapshot; a newer cue cuts the previous one anyway
+  return (["leave", "join", "shareStart", "shareEnd"] as const).find((c) => changes.includes(c)) ?? changes[0];
 }
 
 export function cueSamples(cue: Cue, sampleRate: number) {

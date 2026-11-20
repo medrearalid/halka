@@ -14,6 +14,8 @@ pub const MAX_FRAME: usize = 1 << 20;
 pub const MAX_HELLO: usize = 16 * 1024;
 /// Datagram tags.
 pub const DG_VOICE: u8 = 1;
+/// Screen-share audio, sent only to that stream's watchers.
+pub const DG_STREAM_AUDIO: u8 = 2;
 /// Uni-stream tag for screen share GOPs.
 pub const UNI_STREAM: u8 = b'S';
 

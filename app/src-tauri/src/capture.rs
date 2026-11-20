@@ -1,4 +1,5 @@
 //! Windows Graphics Capture producer for the existing Halka stream protocol.
+mod audio;
 mod encode;
 mod feedback;
 mod sources;
@@ -359,6 +360,7 @@ fn run(
         let _ = capture.session.SetIsBorderRequired(false);
     }
     capture.session.StartCapture()?;
+    let _audio = sources::window_pid(target).map(|pid| audio::start(node.clone(), pid));
     // The frame pool can get the first image while Media Foundation opens the encoder.
     let (mut rung, mut encoder) = Encoder::select(&device, size, &modes, 0)?;
 

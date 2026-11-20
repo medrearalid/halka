@@ -887,6 +887,26 @@ impl Node {
         Ok(())
     }
 
+    /// One screen-share audio datagram (from `voice::StreamAudioEncoder`) to every watcher.
+    pub fn stream_audio(&self, dg: Vec<u8>) {
+        let st = self.0.st.lock();
+        if !st.voice.as_ref().is_some_and(|v| v.streaming) {
+            return;
+        }
+        let dg = bytes::Bytes::from(dg);
+        for id in st.watchers.keys() {
+            if let Some(p) = st.peers.get(id) {
+                let _ = p.conn.send_datagram(dg.clone());
+            }
+        }
+    }
+
+    /// Stream audio from `member` waiting to play here (tests).
+    pub fn debug_stream_audio(&self, member: Id) -> usize {
+        let st = self.0.st.lock();
+        st.voice.as_ref().and_then(|v| v.engine.as_ref()).map_or(0, |e| e.stream_buffered(member))
+    }
+
     pub fn stream_stop(&self) {
         self.stream_stop_in(None);
     }
