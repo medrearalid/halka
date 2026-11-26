@@ -2,6 +2,13 @@
 
 Her sürüm `## <sürüm>` başlığıyla başlar. Maddeler kullanıcıya dönük ve Türkçedir; uygulamadaki "Neler değişti" kartı ve GitHub sürüm sayfası bu dosyadan beslenir.
 
+## 0.1.10
+
+- Ses odasında herkesin kendi pingi ve bağlantısının doğrudan mı relay mi olduğu ayrı ayrı görünüyor; senin koltuğunda da kendi pingin var.
+- Bağlantı etiketinin üzerine gelince sana olan bağlantı ve relay'e neden düşüldüğü yazıyor.
+- Relay üzerinden izlenen yayınlarda ses artık kesilmiyor; bağlantı zorlanınca yayın kalitesi ping yükselmeden düşüyor.
+- Relay şart bir halka için açılan IP gizleme, o halkadan ayrılınca bir sonraki açılışta kendiliğinden kapanıyor.
+
 ## 0.1.9
 
 - Sesler artık daha yüksek: kısık mikrofonlar konuşma düzeyine otomatik yükseltiliyor.
