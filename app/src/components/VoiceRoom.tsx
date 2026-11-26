@@ -6,6 +6,7 @@ import { has, memberOf } from "@/lib/space";
 import { seatAngles } from "@/lib/seats";
 import { joinVoice } from "@/lib/actions";
 import { cn } from "@/lib/utils";
+import { linkLabel } from "@/lib/link";
 import { createStreamDecoder, watchStream } from "@/media/watch";
 import { previewShare } from "@/media/share";
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
@@ -136,16 +137,9 @@ function Ring({ space, channel, meId, joined }: { space: SpaceView; channel: Cha
   );
 }
 
-function connLabel(m: MemberView) {
-  if (m.conn === "self") return null;
-  if (m.conn === "none") return { text: "bağlantı yok", tone: "bg-ink-3" };
-  const rtt = m.rtt_ms;
-  const tone = rtt === null ? "bg-ink-3" : rtt < 80 ? "bg-live" : rtt < 180 ? "bg-warn" : "bg-danger";
-  return { text: `${m.conn === "direct" ? "doğrudan" : "relay"}${rtt !== null ? ` · ${rtt} ms` : ""}`, tone };
-}
-
 function Seat({ space, m, self, size, style }: { space: SpaceView; m: MemberView; self: boolean; size: number; style: CSSProperties }) {
-  const conn = connLabel(m);
+  const meHidden = useApp((s) => s.snap?.active_relay_only ?? false);
+  const conn = linkLabel(m, meHidden);
   const v = m.voice;
   return (
     <ContextMenu>
@@ -181,7 +175,7 @@ function Seat({ space, m, self, size, style }: { space: SpaceView; m: MemberView
                 </div>
               </TooltipTrigger>
               <TooltipContent>
-                {m.conn === "direct" ? "Doğrudan eşler arası bağlantı" : m.conn === "relay" ? "Relay üzerinden — IP adresleri gizli" : "Şu an ulaşılamıyor"}
+                {conn.detail.map((d) => <div key={d}>{d}</div>)}
               </TooltipContent>
             </Tooltip>
           )}

@@ -37,7 +37,7 @@ function Signature() {
 function PrivacyStatus() {
   const active = useApp((s) => s.snap!.active_relay_only);
   const requested = useApp((s) => s.snap!.settings.relay_only);
-  const { busy, error, run } = useSubmit(() => enableRelay());
+  const { busy, error, run } = useSubmit(() => enableRelay(undefined, false));
   const Icon = active ? ShieldCheck : Shield;
   return <div className="welcome-privacy" title="Doğrudan: en hızlısı, üyeler IP adresini görebilir. Relay: bağlantı aktarma sunucusundan geçer, IP adresin gizli kalır.">
     <Icon className={active ? "text-live" : "text-ink-2"} size={17} />

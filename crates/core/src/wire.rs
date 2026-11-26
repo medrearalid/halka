@@ -16,6 +16,8 @@ pub const MAX_HELLO: usize = 16 * 1024;
 pub const DG_VOICE: u8 = 1;
 /// Screen-share audio, sent only to that stream's watchers.
 pub const DG_STREAM_AUDIO: u8 = 2;
+/// A peer's own connection quality, every 2 s. Older clients ignore unknown datagram tags.
+pub const DG_LINK: u8 = 3;
 /// Uni-stream tag for screen share GOPs.
 pub const UNI_STREAM: u8 = b'S';
 
@@ -149,9 +151,43 @@ pub fn diff(ours: &[Bucket], theirs: &[Bucket]) -> Vec<u64> {
     keys.into_iter().filter(|k| a.get(k) != b.get(k)).collect()
 }
 
+/// Sender's own view of its links: median RTT to the peers it measures and how many of those
+/// paths are direct vs relayed; `hidden_ip` = it runs relay-only, so every link to it is relayed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct Link {
+    pub ms: Option<u16>,
+    pub direct: u8,
+    pub relay: u8,
+    pub hidden_ip: bool,
+}
+
+impl Link {
+    pub fn encode(&self) -> [u8; 6] {
+        let ms = self.ms.unwrap_or(u16::MAX).to_le_bytes();
+        [DG_LINK, ms[0], ms[1], self.direct, self.relay, self.hidden_ip as u8]
+    }
+    pub fn decode(dg: &[u8]) -> Option<Link> {
+        let [DG_LINK, a, b, direct, relay, flags, ..] = *dg else { return None };
+        let ms = u16::from_le_bytes([a, b]);
+        Some(Link { ms: (ms != u16::MAX).then_some(ms), direct, relay, hidden_ip: flags & 1 != 0 })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn link_roundtrip() {
+        for l in [
+            Link { ms: Some(38), direct: 2, relay: 1, hidden_ip: false },
+            Link { ms: None, direct: 0, relay: 0, hidden_ip: true },
+        ] {
+            assert_eq!(Link::decode(&l.encode()), Some(l));
+        }
+        assert_eq!(Link::decode(&[DG_LINK, 1, 2]), None);
+        assert_eq!(Link::decode(&[DG_VOICE, 0, 0, 0, 0, 0]), None);
+    }
 
     #[test]
     fn diff_finds_mismatch() {

@@ -67,8 +67,11 @@ pub struct MemberView {
     pub roles: Vec<Id>,
     pub is_owner: bool,
     pub online: bool,
+    /// Our link to this member.
     pub conn: ConnKind,
     pub rtt_ms: Option<u32>,
+    /// The member's own link report (ours for us); None from clients that don't send one.
+    pub link: Option<crate::wire::Link>,
     pub voice: Option<VoiceState>,
 }
 
@@ -118,6 +121,9 @@ pub struct MessageView {
 #[serde(default)]
 pub struct Settings {
     pub relay_only: bool,
+    /// relay_only was turned on by a relay-required space's gate, not by hand: it turns itself
+    /// off at the next start once no such space is left.
+    pub relay_auto: bool,
     pub relays: Vec<String>,
     pub noise_suppression: bool,
     pub echo_cancellation: bool,
@@ -135,6 +141,7 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             relay_only: false,
+            relay_auto: false,
             relays: vec![],
             noise_suppression: true,
             echo_cancellation: true,

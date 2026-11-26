@@ -42,6 +42,7 @@ interface Person {
   online: boolean;
   conn: MemberView["conn"];
   rtt: number | null;
+  link?: MemberView["link"];
 }
 interface MSpace {
   id: Id;
@@ -61,12 +62,12 @@ export function createMockBackend(): Backend {
 
   const me: Snapshot["me"] = { id: hexId("me-ada"), name: fresh ? "Anonim" : "Ada", code: "KQ4M-7TXA-P2LD" };
   const people: Person[] = [
-    { id: me.id, name: me.name, online: true, conn: "self", rtt: null },
-    { id: hexId("deniz"), name: "Deniz", online: true, conn: "direct", rtt: 18 },
-    { id: hexId("ece"), name: "Ece Yıldız", online: true, conn: "direct", rtt: 31 },
-    { id: hexId("mert"), name: "Mert", online: true, conn: "relay", rtt: 74 },
+    { id: me.id, name: me.name, online: true, conn: "self", rtt: null, link: { ms: 31, direct: 3, relay: 2, hidden_ip: false } },
+    { id: hexId("deniz"), name: "Deniz", online: true, conn: "direct", rtt: 18, link: { ms: 24, direct: 4, relay: 0, hidden_ip: false } },
+    { id: hexId("ece"), name: "Ece Yıldız", online: true, conn: "direct", rtt: 31, link: { ms: 42, direct: 3, relay: 1, hidden_ip: false } },
+    { id: hexId("mert"), name: "Mert", online: true, conn: "relay", rtt: 74, link: { ms: 88, direct: 0, relay: 4, hidden_ip: true } },
     { id: hexId("zeynep"), name: "Zeynep", online: true, conn: "direct", rtt: 22 },
-    { id: hexId("kaan"), name: "Kaan Aksoy", online: true, conn: "relay", rtt: 96 },
+    { id: hexId("kaan"), name: "Kaan Aksoy", online: true, conn: "relay", rtt: 96, link: { ms: 140, direct: 1, relay: 3, hidden_ip: false } },
     { id: hexId("selin"), name: "Selin", online: false, conn: "none", rtt: null },
     { id: hexId("burak"), name: "Burak", online: false, conn: "none", rtt: null },
   ];
@@ -81,7 +82,7 @@ export function createMockBackend(): Backend {
   const mkMember = (id: Id, roles: Id[], owner: Id): MemberView => {
     const p = people.find((x) => x.id === id)!;
     const code = id === me.id ? me.code : id.slice(0, 12).toUpperCase().match(/.{4}/g)!.join("-");
-    return { id, name: p.name, code, roles, is_owner: id === owner, online: p.online, conn: p.conn, rtt_ms: p.rtt, voice: null };
+    return { id, name: p.name, code, roles, is_owner: id === owner, online: p.online, conn: p.conn, rtt_ms: p.rtt, link: p.link ?? null, voice: null };
   };
   const ch = (name: string, kind: ChannelView["kind"], extra: Partial<ChannelView> = {}): ChannelView => ({
     id: hexId(`ch-${name}-${kind}-${Math.random()}`),
@@ -163,6 +164,7 @@ export function createMockBackend(): Backend {
   const activeRelayOnly = localStorage.getItem("halka.mock.relayOnly") === "true";
   let settings: Settings = {
     relay_only: activeRelayOnly,
+    relay_auto: false,
     relays: [],
     noise_suppression: true,
     echo_cancellation: true,

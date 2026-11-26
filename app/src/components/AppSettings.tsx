@@ -267,12 +267,13 @@ function Privacy() {
           desc={
             <>
               {active ? "IP adresin gizli." : "Şu an doğrudan bağlanıyorsun."}{" "}
+              {settings.relay_only && settings.relay_auto && "Relay şart bir halka için açıldı; o halkadan ayrılınca kendiliğinden kapanır. "}
               {active !== settings.relay_only ? <span className="text-warn">Bir sonraki açılışta doğrudan bağlantıya döner.</span> : active ? "Kapatırsan bir sonraki açılışta geçerli olur." : "Açınca uygulama hemen yeniden başlar."}
             </>
           }
         >
           {/* turning on restarts right away and resumes; turning off waits for the next launch */}
-          <Switch checked={settings.relay_only} onCheckedChange={(v) => (v && !active ? void enableRelay().catch(fail) : saveSettings({ relay_only: v }))} aria-label="Yalnızca relay" />
+          <Switch checked={settings.relay_only} onCheckedChange={(v) => (v && !active ? void enableRelay(undefined, false).catch(fail) : saveSettings({ relay_only: v, relay_auto: false }))} aria-label="Yalnızca relay" />
         </Row>
         <ConnExplainer className="border-b border-line py-2.5" />
       </Group>

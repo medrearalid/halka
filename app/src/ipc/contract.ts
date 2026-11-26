@@ -67,9 +67,21 @@ export interface MemberView {
   roles: Id[];
   is_owner: boolean;
   online: boolean;
+  /** Our link to this member. */
   conn: ConnKind;
   rtt_ms: number | null;
+  /** The member's own link report (ours for us); null from older clients. */
+  link: LinkView | null;
   voice: VoiceState | null;
+}
+
+export interface LinkView {
+  /** Median RTT to the peers they measure (their voice room, else everyone). */
+  ms: number | null;
+  direct: number;
+  relay: number;
+  /** They run relay-only: every link to them is relayed. */
+  hidden_ip: boolean;
 }
 
 export interface InviteView {
@@ -135,6 +147,7 @@ export interface AudioDevices {
 export interface Settings {
   /** Hide your IP from peers: only connect through relays. Requires restart. */
   relay_only: boolean;
+  relay_auto: boolean;
   /** Custom relay URLs; empty = built-in public relays. Requires restart. */
   relays: string[];
   noise_suppression: boolean;

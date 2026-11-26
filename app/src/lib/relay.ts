@@ -9,11 +9,12 @@ type Resume = {
   join?: string;
 };
 
-/** Relay-only binds at startup: save it, remember where we are, relaunch. */
-export async function enableRelay(join?: string) {
+/** Relay-only binds at startup: save it, remember where we are, relaunch.
+ *  `auto`: a relay-required space asked for it, so it ends once no such space is left. */
+export async function enableRelay(join?: string, auto = true) {
   const s = useApp.getState();
   const snap = s.snap!;
-  await call("set_settings", { settings: { ...snap.settings, relay_only: true } });
+  await call("set_settings", { settings: { ...snap.settings, relay_only: true, relay_auto: auto } });
   const r: Resume = { space: s.space, channel: s.channel, welcome: s.welcome, voice: snap.voice, join };
   await call("restart_app", { resume: JSON.stringify(r) });
 }

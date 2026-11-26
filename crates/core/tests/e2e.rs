@@ -418,6 +418,16 @@ async fn voice_reaches_peer_for(relay_only: bool, mic: &'static str, listen_secs
             "relay_only must not go direct"
         );
         eprintln!("relay rtt: {:?} ms", m.rtt_ms);
+        // a's own link report reaches b and says every link to a is relayed
+        until("a's link report", || {
+            b.snapshot().spaces[0]
+                .members
+                .iter()
+                .find(|m| m.id == a.id())
+                .and_then(|m| m.link)
+                .is_some_and(|l| l.hidden_ip && l.relay >= 1 && l.direct == 0)
+        })
+        .await;
     }
     if listen_secs > 0.0 {
         // restart a's room so the file plays from the top while b is already listening

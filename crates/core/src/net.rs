@@ -149,7 +149,17 @@ pub(crate) fn spawn_background(i: &Arc<Inner>) {
                 p.emit(Event::Levels(l));
             }
             if n % 40 == 0 && !p.st.lock().peers.is_empty() {
+                {
+                    let st = p.st.lock();
+                    let dg = bytes::Bytes::copy_from_slice(&my_link(&p, &st).encode());
+                    for peer in st.peers.values() {
+                        let _ = peer.conn.send_datagram(dg.clone());
+                    }
+                }
                 p.emit(Event::Changed); // rtt / path type updates
+                if queue_delay_rising(&mut p.st.lock()) {
+                    p.emit(Event::StreamCongested);
+                }
             }
             if n % (RESYNC_EVERY.as_millis() as u64 / 50) == 0 {
                 let mut st = p.st.lock();
@@ -171,7 +181,9 @@ pub(crate) fn remote_addr(c: &Connection) -> iroh::EndpointAddr {
 }
 
 pub(crate) fn path_info(c: &Connection) -> (ConnKind, Option<u32>) {
-    match c.paths().iter().find(|p| p.is_selected()) {
+    let paths = c.paths();
+    // no selected path yet: report what we have instead of assuming relay
+    match paths.iter().find(|p| p.is_selected()).or_else(|| paths.iter().next()) {
         Some(p) => (
             if p.is_relay() {
                 ConnKind::Relay
@@ -181,6 +193,62 @@ pub(crate) fn path_info(c: &Connection) -> (ConnKind, Option<u32>) {
             Some(p.rtt().as_millis() as u32),
         ),
         None => (ConnKind::Relay, None),
+    }
+}
+
+/// While we share: a watcher whose RTT climbs well above its recent minimum means our video
+/// is filling a queue on the way (typically a relay), long before frames go stale.
+fn queue_delay_rising(st: &mut St) -> bool {
+    const WINDOW: Duration = Duration::from_secs(30);
+    let mut rising = false;
+    let St { watchers, peers, .. } = st;
+    for (id, w) in watchers.iter_mut() {
+        let Some((kind, Some(rtt))) = peers.get(id).map(|p| path_info(&p.conn)) else {
+            continue;
+        };
+        let relay = kind == ConnKind::Relay;
+        let base = match w.base {
+            Some((b, r, since)) if r == relay && since.elapsed() < WINDOW => b.min(rtt),
+            _ => {
+                w.base = Some((rtt, relay, Instant::now()));
+                rtt
+            }
+        };
+        if let Some(b) = w.base.as_mut() {
+            b.0 = base;
+        }
+        rising |= rtt > base * 2 + 40;
+    }
+    rising
+}
+
+/// Our own link report: links to the voice room we're in (to every peer outside voice, or
+/// when we sit in the room alone).
+pub(crate) fn my_link(i: &Inner, st: &St) -> wire::Link {
+    let room = st.voice.as_ref().map(|v| (v.space, v.channel));
+    let in_room = |id: &Id| {
+        room.is_none_or(|(s, c)| st.presence.get(&(s, *id)).is_some_and(|p| p.channel == c))
+    };
+    let mut paths: Vec<_> = st.peers.iter().filter(|(id, _)| in_room(id)).collect();
+    if paths.is_empty() {
+        paths = st.peers.iter().collect();
+    }
+    let mut rtts = Vec::new();
+    let (mut direct, mut relay) = (0u8, 0u8);
+    for (_, p) in paths {
+        let (kind, rtt) = path_info(&p.conn);
+        match kind {
+            ConnKind::Direct => direct = direct.saturating_add(1),
+            _ => relay = relay.saturating_add(1),
+        }
+        rtts.extend(rtt);
+    }
+    rtts.sort_unstable();
+    wire::Link {
+        ms: rtts.get(rtts.len() / 2).map(|&r| r.min(u16::MAX as u32 - 1) as u16),
+        direct,
+        relay,
+        hidden_ip: i.active_relay_only,
     }
 }
 
@@ -426,6 +494,7 @@ async fn run_peer(
                 spaces,
                 joining,
                 dialer,
+                link: None,
             },
         );
         let _ = i.store.put_peer_addr(
@@ -845,9 +914,14 @@ fn handle(i: &Arc<Inner>, remote: Id, f: Frame) -> Result<()> {
             ensure!(st.watchers.len() < 16, "too many watchers");
             let conn = st.peers.get(&remote).context("peer")?.conn.clone();
             let (tx, rx) = mpsc::channel(240);
-            st.watchers.insert(remote, Watcher { tx, skipping: true });
+            st.watchers.insert(remote, Watcher { tx, skipping: true, base: None });
+            let relayed = path_info(&conn).0 == ConnKind::Relay;
             tokio::spawn(gop_sender(conn, rx, i.clone()));
             drop(st);
+            if relayed {
+                // relayed traffic shares one link to the relay server: start lower
+                i.emit(Event::StreamCongested);
+            }
             i.emit(Event::StreamKeyframe);
         }
         Frame::Keyframe => {
@@ -1222,7 +1296,18 @@ async fn datagram_loop(i: Arc<Inner>, conn: Connection, remote: Id) {
     let mut rate = Rate::new(240.0, 480.0);
     while let Ok(dg) = conn.read_datagram().await {
         let tag = dg.first().copied();
-        if !rate.allow(1.0) || !matches!(tag, Some(wire::DG_VOICE | wire::DG_STREAM_AUDIO)) {
+        if !rate.allow(1.0)
+            || !matches!(tag, Some(wire::DG_VOICE | wire::DG_STREAM_AUDIO | wire::DG_LINK))
+        {
+            continue;
+        }
+        if tag == Some(wire::DG_LINK) {
+            if let Some(l) = wire::Link::decode(&dg)
+                && let Some(p) = i.st.lock().peers.get_mut(&remote)
+                && p.conn.stable_id() == conn.stable_id()
+            {
+                p.link = Some((l, Instant::now()));
+            }
             continue;
         }
         let st = i.st.lock();

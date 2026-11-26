@@ -6,6 +6,7 @@ import { has, hex, myRank, outranks, shortId, topRole } from "@/lib/space";
 import { moveRole } from "@/lib/roleOrder";
 import { copy, fail } from "@/lib/actions";
 import { cn } from "@/lib/utils";
+import { linkLabel } from "@/lib/link";
 import {
   ContextMenu,
   ContextMenuCheckboxItem,
@@ -299,7 +300,8 @@ export function MemberMenuContent({ space, m }: { space: SpaceView; m: MemberVie
       : [];
   const canKick = has(space, "kick") && above;
   const canBan = has(space, "ban") && above;
-  const conn = m.conn === "direct" ? "doğrudan" : m.conn === "relay" ? "relay" : m.conn === "self" ? "sen" : "bağlı değil";
+  const meHidden = useApp((s) => s.snap?.active_relay_only ?? false);
+  const conn = linkLabel(m, meHidden)?.text ?? (m.conn === "self" ? "sen" : "bağlı değil");
 
   return (
     <ContextMenuContent className="w-[232px]">
@@ -309,7 +311,6 @@ export function MemberMenuContent({ space, m }: { space: SpaceView; m: MemberVie
           <span className="block truncate text-[13px] font-medium">{m.name}</span>
           <span className="num block truncate font-mono text-[10.5px] font-normal text-ink-3">
             {shortId(m.id)} · {conn}
-            {m.rtt_ms !== null && ` · ${m.rtt_ms} ms`}
           </span>
         </span>
       </ContextMenuLabel>

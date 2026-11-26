@@ -73,10 +73,14 @@ struct StreamPeer {
     last_seq: Option<u16>,
     primed: bool,
     heard: std::time::Instant,
+    /// Adaptive like voice: relayed links jitter more, so the cushion grows on underruns.
+    target: usize,
+    calm: usize,
 }
 
-/// Interleaved stereo samples buffered before stream audio starts playing (60 ms).
+/// Interleaved stereo samples buffered before stream audio starts playing: 60..200 ms.
 const STREAM_TARGET: usize = FRAME20 * 2 * 3;
+const STREAM_TARGET_MAX: usize = FRAME20 * 2 * 10;
 
 #[derive(Default)]
 struct Mixer {
@@ -501,11 +505,22 @@ impl Voice {
 
     /// Incoming screen-share audio from `peer`, whose stream we watch (checked by the node).
     pub fn receive_stream(&self, peer: Id, dg: &[u8]) {
+        receive_stream_into(&self.sh, peer, dg)
+    }
+
+    /// Interleaved samples of `peer`'s stream audio waiting to play (tests).
+    pub fn stream_buffered(&self, peer: Id) -> usize {
+        self.sh.mixer.lock().streams.get(&peer).map_or(0, |s| s.queue.len())
+    }
+}
+
+fn receive_stream_into(sh: &Shared, peer: Id, dg: &[u8]) {
+    {
         if dg.len() < 4 || dg[0] != DG_STREAM_AUDIO {
             return;
         }
         let seq = u16::from_le_bytes([dg[1], dg[2]]);
-        let mut m = self.sh.mixer.lock();
+        let mut m = sh.mixer.lock();
         let p = match m.streams.entry(peer) {
             std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
             std::collections::hash_map::Entry::Vacant(v) => {
@@ -518,6 +533,8 @@ impl Voice {
                     last_seq: None,
                     primed: false,
                     heard: std::time::Instant::now(),
+                    target: STREAM_TARGET,
+                    calm: 0,
                 })
             }
         };
@@ -539,15 +556,10 @@ impl Voice {
         if let Ok(n) = p.dec.decode_float(&dg[3..], &mut pcm, false) {
             p.queue.extend(&pcm[..n * 2]);
         }
-        if p.queue.len() > STREAM_TARGET + SLACK * 2 {
-            let drop = p.queue.len() - STREAM_TARGET;
+        if p.queue.len() > p.target + SLACK * 2 {
+            let drop = p.queue.len() - p.target;
             p.queue.drain(..drop & !1);
         }
-    }
-
-    /// Interleaved samples of `peer`'s stream audio waiting to play (tests).
-    pub fn stream_buffered(&self, peer: Id) -> usize {
-        self.sh.mixer.lock().streams.get(&peer).map_or(0, |s| s.queue.len())
     }
 }
 
@@ -688,19 +700,27 @@ fn mix(sh: &Shared, frames: usize, out: &mut Vec<f32>, reference: &mut impl Prod
         m.streams.retain(|_, s| s.heard.elapsed() < Duration::from_secs(2));
         for s in m.streams.values_mut() {
             if !s.primed {
-                s.primed = s.queue.len() >= STREAM_TARGET;
+                s.primed = s.queue.len() >= s.target;
                 if !s.primed {
                     continue;
                 }
             }
             for i in 0..frames {
                 let (Some(l), Some(r)) = (s.queue.pop_front(), s.queue.pop_front()) else {
-                    s.primed = false; // underrun: rebuffer
+                    // underrun: rebuffer with more cushion
+                    s.primed = false;
+                    s.target = (s.target + FRAME20 * 2).min(STREAM_TARGET_MAX);
+                    s.calm = 0;
                     break;
                 };
                 out[i * 2] += l;
                 out[i * 2 + 1] += r;
                 mono[i] += (l + r) * 0.5;
+            }
+            s.calm += frames;
+            if s.calm > CALM_SAMPLES {
+                s.calm = 0;
+                s.target = s.target.saturating_sub(FRAME10 * 2).max(STREAM_TARGET);
             }
         }
     }
@@ -941,6 +961,32 @@ mod tests {
             .fold((0.0, 0.0), |(l, r), c| (l + c[0].abs(), r + c[1].abs()));
         assert!(r > 10.0 && l < r * 0.01, "panned right: l={l} r={r}");
         assert!(out.iter().all(|s| s.abs() <= 1.0));
+    }
+
+    #[test]
+    fn stream_jitter_adapts() {
+        let sh = shared();
+        let peer = Id([7; 32]);
+        let mut enc = StreamAudioEncoder::new().unwrap();
+        let pcm = vec![0.1f32; FRAME20 * 2];
+        let target = |sh: &Shared| sh.mixer.lock().streams[&peer].target;
+        for _ in 0..3 {
+            receive_stream_into(&sh, peer, &enc.encode(&pcm).unwrap());
+        }
+        assert_eq!(target(&sh), STREAM_TARGET);
+        let (mut rb_tx, _rb_rx) = HeapRb::<f32>::new(RATE as usize).split();
+        let mut out = Vec::new();
+        mix(&sh, FRAME20 * 4, &mut out, &mut rb_tx); // asks for more than is queued
+        assert_eq!(target(&sh), STREAM_TARGET + FRAME20 * 2, "underrun grows the cushion");
+        // a long calm period shrinks it back, never below the floor
+        for _ in 0..12 {
+            receive_stream_into(&sh, peer, &enc.encode(&pcm).unwrap());
+        }
+        for _ in 0..(CALM_SAMPLES / FRAME20 * 3) {
+            receive_stream_into(&sh, peer, &enc.encode(&pcm).unwrap());
+            mix(&sh, FRAME20, &mut out, &mut rb_tx);
+        }
+        assert_eq!(target(&sh), STREAM_TARGET);
     }
 
     /// The far end plays through our speaker and leaks back into the mic (delayed, quieter).

@@ -125,7 +125,7 @@ export function RelayGate({ join, note = true }: { join?: string; note?: boolean
   const { busy, error, run } = useSubmit(() => enableRelay(join));
   return (
     <div className="grid justify-items-center gap-2">
-      {note && <p className="text-xs text-warn">Bu halkada relay şart. IP’ni gizleyince uygulama yeniden başlar ve kaldığın yere döner.</p>}
+      {note && <p className="text-xs text-warn">Bu halkada relay şart. IP’ni gizleyince uygulama yeniden başlar ve kaldığın yere döner. Gizleme tüm halkalarda geçerli olur; bu halkadan ayrılınca kendiliğinden kapanır.</p>}
       {error && <p className="text-xs text-danger">{error}</p>}
       <Button type="button" variant="outline" className="w-fit" disabled={busy} aria-busy={busy} onClick={() => void run()}>
         {busy ? "Yeniden başlatılıyor…" : "IP’mi gizle ve yeniden başlat"}

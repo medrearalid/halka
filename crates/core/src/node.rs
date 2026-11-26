@@ -35,6 +35,8 @@ pub(crate) struct Peer {
     pub joining: Option<Id>,
     /// Who dialed (for deterministic duplicate-connection resolution).
     pub dialer: Id,
+    /// The remote's own latest link report and when it arrived.
+    pub link: Option<(wire::Link, std::time::Instant)>,
 }
 
 pub(crate) struct MyVoice {
@@ -49,6 +51,9 @@ pub(crate) struct MyVoice {
 pub(crate) struct Watcher {
     pub tx: mpsc::Sender<WatchPacket>,
     pub skipping: bool,
+    /// Delay-based congestion: windowed minimum RTT, the path kind it was measured on, and
+    /// when the window started.
+    pub base: Option<(u32, bool, std::time::Instant)>,
 }
 
 pub(crate) struct WatchPacket {
@@ -144,7 +149,7 @@ impl Node {
         let store = Store::open(&data_dir.join("halka.redb"))?;
         let key = crate::identity::load_or_create(&store)?;
         let me: Id = key.public().into();
-        let settings: Settings = store
+        let mut settings: Settings = store
             .meta("settings")?
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or_default();
@@ -164,6 +169,12 @@ impl Node {
             if log.state.is_member(&me) {
                 spaces.insert(sid, log);
             }
+        }
+
+        if auto_relay_expired(&settings, &spaces) {
+            settings.relay_only = false;
+            settings.relay_auto = false;
+            store.set_meta("settings", &serde_json::to_vec(&settings)?)?;
         }
 
         let lookup = MemoryLookup::new();
@@ -958,6 +969,12 @@ impl Node {
 
 // ---------------------------------------------------------------------- helpers
 
+/// Relay-only that a relay-required space's gate turned on ends when no such space is left;
+/// relay-only the user chose stays.
+fn auto_relay_expired(s: &Settings, spaces: &BTreeMap<Id, SpaceLog>) -> bool {
+    s.relay_only && s.relay_auto && !spaces.values().any(|l| l.state.relay_required)
+}
+
 /// The UI matches on "relay şart" to offer turning relay on.
 const RELAY_REQUIRED: &str = "Bu halkada relay şart: önce IP’ni gizlemelisin";
 
@@ -1249,13 +1266,14 @@ fn space_view(i: &Inner, st: &St, log: &SpaceLog) -> api::SpaceView {
         .members
         .iter()
         .map(|(m, mm)| {
-            let (online, conn, rtt) = if *m == me {
-                (true, ConnKind::Me, None)
+            let (online, conn, rtt, link) = if *m == me {
+                (true, ConnKind::Me, None, Some(crate::net::my_link(i, st)))
             } else if let Some(p) = st.peers.get(m).filter(|p| p.spaces.contains(&s.id)) {
                 let (kind, rtt) = crate::net::path_info(&p.conn);
-                (true, kind, rtt)
+                let fresh = p.link.filter(|(_, at)| at.elapsed() < std::time::Duration::from_secs(6));
+                (true, kind, rtt, fresh.map(|(l, _)| l))
             } else {
-                (false, ConnKind::None, None)
+                (false, ConnKind::None, None, None)
             };
             let voice = if *m == me {
                 st.voice
@@ -1286,6 +1304,7 @@ fn space_view(i: &Inner, st: &St, log: &SpaceLog) -> api::SpaceView {
                 online,
                 conn,
                 rtt_ms: rtt,
+                link,
                 voice,
             }
         })
@@ -1319,6 +1338,20 @@ fn space_view(i: &Inner, st: &St, log: &SpaceLog) -> api::SpaceView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn relay_auto_reverts_only_when_gate_opened_it() {
+        let none = BTreeMap::new();
+        let auto = Settings { relay_only: true, relay_auto: true, ..Settings::default() };
+        assert!(auto_relay_expired(&auto, &none));
+        let manual = Settings { relay_only: true, ..Settings::default() };
+        assert!(!auto_relay_expired(&manual, &none));
+        let key = iroh::SecretKey::generate();
+        let mut log = SpaceLog::new(crate::space::create_genesis(&key, "Gizli").unwrap()).unwrap();
+        log.author(&key, OpBody::RequireRelay).unwrap();
+        let spaces = BTreeMap::from([(Id::ZERO, log)]);
+        assert!(!auto_relay_expired(&auto, &spaces), "still in a relay-required space");
+    }
 
     #[tokio::test]
     async fn relay_only_never_opens_ip_sockets() {
